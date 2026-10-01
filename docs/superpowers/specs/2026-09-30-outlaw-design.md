@@ -217,7 +217,8 @@ action the spec doesn't mark fair (e.g. `LimitKill` in `specs/TLCRunner.tla`,
 which has `WF_vars(Reap)` but nothing naming `LimitKill`) is never required to
 happen.
 
-At the end of every run that declares internal actions, the runner *settles*:
+At the end of every run that declares internal actions, and at every `:settle`
+point the generator places mid-run (§5.1), the runner *settles*:
 it re-projects every 10 ms for up to `settle_timeout` (config, default
 1_000 ms) until the implementation reaches a candidate state where no fair
 internal action is enabled (self-loops ignored) -- `closure` itself still
@@ -241,8 +242,11 @@ it is `S` itself, and the rules below reduce to the Phase 1 semantics.
 1. Load graph (cache or TLC). `C := closure(initial_states(graph))`.
 2. `init/0`; `p := project(ctx)`; `C := {s ∈ C : observed(s) = p}`. Empty → fail
    (`:init_mismatch`).
-3. Generate a sequence (length ≤ `max_steps`) of `{name, params}` from `actions/0`.
-   For each step, with `B := closure(C)`:
+3. Generate a sequence (length ≤ `max_steps`) of `{name, params}` steps and
+   `:settle` points (§5.1). A `:settle` point settles (§4.3) mid-run: on
+   success it records a `(settle)` step, sets `C` to the settled candidates and
+   continues; with no fair internal actions declared it is a no-op and records
+   nothing. For each `{name, params}` step, with `B := closure(C)`:
    - `E := {t : s ∈ B, t ∈ successors(graph, s, name)}`.
    - Call `action(name, params, ctx)` under `action_timeout`.
    - **Accepted while `E = ∅`**: fail (`:action_not_enabled`) — the
@@ -263,6 +267,56 @@ marks the first divergent step. A failure viewer HTML is written to
 
 Invariants need no separate runtime check: every state in the graph already
 satisfies them (TLC verified), so matching the graph implies them.
+
+### 5.1 Spec-guided generation (Phase 1.5)
+
+Sequences come from `Outlaw.Conformance.Walk`, which walks the spec's graph
+abstractly (`use Outlaw.Conformance, generation: :uniform` keeps the Phase 1
+generator: uniform picks from `actions/0`, no `:settle` points).
+
+- **Possible set.** The walk tracks `P`, the spec states the run could be in:
+  `P := closure(initial)`; after emitting action `a`,
+  `P := closure(successors(P, a))`, or `P` unchanged if `a` is enabled nowhere in
+  `P` (the implementation must reject it).
+- **Target.** Each generated value first picks a transition `(s, a, t)`
+  uniformly among all graph edges (internal ones included) and emits the
+  shortest external-action path from `closure(initial)` to `s` (BFS over the
+  graph; paths cached per graph and target), then `a` if external, or a
+  `:settle` point if `a` is internal.
+- **Continue.** Then a random walk up to `max_steps`: ~80% an action enabled
+  somewhere in `P` (uniform), ~15% an action disabled everywhere in `P` (guard
+  testing), ~5% a `:settle` point — 50% immediately after a step that makes a
+  fair internal action enabled somewhere in `P`.
+- **Params.** Every emitted action takes a value from its `actions/0` params
+  generator. The walk cannot choose params that lead to a particular edge, so
+  for parameterised actions targeting is by action name only.
+- **Reproducibility and shrinking.** All randomness is StreamData's, so `--seed`
+  reproduces the sequences; a value is a plain list of steps and `:settle`
+  points and shrinks like any list (removing steps may turn later actions into
+  disabled ones, which still test guards).
+
+### 5.2 Coverage
+
+Each passing `check` reports coverage accumulated over all its runs (a failing
+check reports its failure instead; a passing check never shrinks, so every
+counted execution is an original run):
+
+- **Actions** — an external action is reached when a step accepted it. An
+  internal action is reached when, after a step or settle, no new candidate
+  lies in the set reachable without internal steps; every internal edge into
+  the new candidates from that closure then counts.
+- **Observed states** — distinct projections seen in steps, out of the distinct
+  projections (on the observed variables) of all graph states.
+- **Observed transitions** — distinct `(projection before, action, projection
+  after)` triples of accepted steps, out of the distinct triples of all
+  external graph edges.
+
+Text reports add `coverage: actions 9/9, observed states 29/29, transitions
+52/57` under the conformance stage, plus `warning: never reached: LimitKill` /
+`warning: N observed states never reached (first: ...)` lines for gaps. JSON adds
+`"coverage": {"actions" | "states" | "transitions": {"reached", "total",
+"unreached"}}` (`unreached` capped at 20 entries, states as TLA+ text). Gaps are
+warnings only; they never change a stage's status.
 
 **Not checked at conformance time (documented limits):**
 - Liveness/fairness — proven by TLC on the spec only.
