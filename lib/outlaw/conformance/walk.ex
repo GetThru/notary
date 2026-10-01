@@ -5,14 +5,52 @@ defmodule Outlaw.Conformance.Walk do
   picking uniformly at random from `actions/0` (`generation: :uniform`, see
   `Outlaw.Conformance.Runner.steps_generator/2`).
 
-  Pure: no processes, no global/persistent state. Shortest-path results are
-  memoized in a local map built once per `generator/3` call (see
-  `generator/3`'s `@doc`), not shared across calls.
+  Pure: no processes, no global/persistent state. `shortest_path/5` runs a
+  single BFS with parent pointers (O(V+E)); `generator/3` runs it once per
+  build and reconstructs every needed path from the parent map in O(path
+  length) each — no repeated per-target BFS.
+
+  ## Generator shape (why it's built this way)
+
+  A value is drawn as plain data —
+  `%{targeted?: boolean(), target_index: non_neg_integer(), tokens: [token]}`
+  (a "token" bundles one step's random choices: a weighted bucket roll, a
+  pick index, a settle-bias roll, and params per action) — and then
+  `StreamData.map/2` *folds* that data into the actual `[{name, params} |
+  :settle]` list by simulating the walk deterministically against it. This
+  (rather than a chain of nested `StreamData.bind/2` calls simulating the
+  walk step-by-step as randomness is drawn) is what makes values shrink like
+  lists: `tokens` is an ordinary `StreamData.list_of/2`, so StreamData can
+  delete a token to shorten the value, and the fold naturally reprocesses a
+  shorter, still-consistent sequence — the previous nested-bind design
+  produced values of exactly `max_steps` items that could never shrink
+  shorter (only each item's own choice could shrink, regenerating its entire
+  tail). `targeted?` shrinks to `false` (dropping the prefix entirely), so a
+  minimal failing trace doesn't have to drag a shortest-path prefix along.
+
+  ## Forced settle (fair internal actions)
+
+  In the continuation phase, after a step the walk checks whether it just
+  made a fair internal action (`opts[:fair]`) go from *not* enabled anywhere
+  in the possible set `P` to enabled somewhere in `P` — a rising edge, not
+  merely "currently enabled" (an already-enabled fair action does not keep
+  re-triggering the bias on every subsequent step). Only then does the next
+  token's settle-bias roll get a chance to force `:settle` (probability 1/2);
+  otherwise it's ignored and the token resolves normally. "Enabled" here
+  ignores self-loops (a successor equal to the source state), matching
+  `Outlaw.Conformance.Runner`'s settling check — a self-loop can never be
+  observed, so it can never force (or block) a settle.
   """
 
   alias Outlaw.{Config, StateGraph}
 
   @type possible :: [StateGraph.state_id()]
+  @type token :: %{
+          bucket: :enabled | :disabled | :settle,
+          pick_index: non_neg_integer(),
+          settle_bias: boolean(),
+          params: %{String.t() => map()}
+        }
 
   @doc """
   Every state reachable from `state_ids` through zero or more edges labelled
@@ -51,79 +89,105 @@ defmodule Outlaw.Conformance.Walk do
   end
 
   @doc """
-  BFS over edges labelled with one of `external_actions`, from any of
-  `from_states`, to `target_state`, taking closure under every other graph
-  action (treated as internal for this purpose: `graph.actions --
-  external_actions`) at every node — so a target reachable from a node's
-  closure needs no further external action. Returns the shortest list of
-  external action names, or `nil` if `target_state` isn't reachable this way.
-  """
-  @spec shortest_path(StateGraph.t(), [StateGraph.state_id()], StateGraph.state_id(), [
-          String.t()
-        ]) :: [String.t()] | nil
-  def shortest_path(graph, from_states, target_state, external_actions) do
-    internal = MapSet.difference(graph.actions, MapSet.new(external_actions)) |> MapSet.to_list()
-    actions = Enum.sort(external_actions)
-    start = Enum.uniq(from_states)
-    closed_start = closure(graph, start, internal)
+  Shortest external-action path from any of `from_states` to `target_state`,
+  taking closure under `internal` at every node (so a target already in a
+  visited node's internal closure needs no further external action). `[]`
+  means `target_state` is already in `closure(from_states, internal)`; `nil`
+  means it's unreachable this way.
 
-    if target_state in closed_start do
-      []
-    else
-      queue = :queue.from_list(Enum.map(start, &{&1, []}))
-      bfs(graph, queue, MapSet.new(start), internal, actions, target_state)
+  Runs a single BFS from `closure(from_states, internal)` with parent
+  pointers (O(V+E) over the states/edges actually visited), then
+  reconstructs the path by walking parents backward once — no per-target
+  re-search, no repeated list-append while searching.
+  """
+  @spec shortest_path(
+          StateGraph.t(),
+          [StateGraph.state_id()],
+          StateGraph.state_id(),
+          [
+            String.t()
+          ],
+          [String.t()]
+        ) :: [String.t()] | nil
+  def shortest_path(graph, from_states, target_state, external_actions, internal) do
+    closed_start = closure(graph, Enum.uniq(from_states), internal)
+    parents = bfs_parents(graph, closed_start, internal, external_actions)
+    reconstruct_path(parents, target_state)
+  end
+
+  # Single-source-set BFS building a parent-pointer map: state_id => :root
+  # (one of the start states, already closed) or {prev_state_id, action}
+  # (reached from prev_state_id via action). A state absent from the map was
+  # never visited (unreachable).
+  #
+  # When a brand-new state `t` is discovered via `action` from `from`, every
+  # member of `closure([t], internal)` is registered with the *same* parent
+  # pointer `{from, action}` and enqueued individually — they're all reached
+  # by the same external path (the internal hops to reach them are free).
+  # Every member therefore gets its own turn to explore its own direct
+  # successors, which together cover the same ground as exploring from the
+  # whole closure at once, without recomputing it at every pop.
+  defp bfs_parents(graph, closed_start, internal, external_actions) do
+    actions = Enum.sort(external_actions)
+    parents = Map.new(closed_start, &{&1, :root})
+    queue = :queue.from_list(closed_start)
+    bfs_parents_loop(graph, queue, parents, internal, actions)
+  end
+
+  defp bfs_parents_loop(graph, queue, parents, internal, actions) do
+    case :queue.out(queue) do
+      {:empty, _} ->
+        parents
+
+      {{:value, state}, rest} ->
+        {new_queue, new_parents} =
+          Enum.reduce(actions, {rest, parents}, fn action, {q, par} ->
+            graph
+            |> StateGraph.successors(state, action)
+            |> Enum.reduce({q, par}, &discover(graph, internal, state, action, &1, &2))
+          end)
+
+        bfs_parents_loop(graph, new_queue, new_parents, internal, actions)
     end
   end
 
-  defp bfs(graph, queue, visited, internal, actions, target) do
-    case :queue.out(queue) do
-      {:empty, _} ->
-        nil
-
-      {{:value, {state, path}}, rest} ->
-        closed = closure(graph, [state], internal)
-
-        if target in closed do
-          path
+  defp discover(graph, internal, from, action, target, {queue, parents}) do
+    if Map.has_key?(parents, target) do
+      {queue, parents}
+    else
+      graph
+      |> closure([target], internal)
+      |> Enum.reduce({queue, parents}, fn alias_state, {q, par} ->
+        if Map.has_key?(par, alias_state) do
+          {q, par}
         else
-          {new_queue, new_visited} =
-            Enum.reduce(actions, {rest, visited}, fn action, {q, vis} ->
-              closed
-              |> Enum.flat_map(&StateGraph.successors(graph, &1, action))
-              |> Enum.uniq()
-              |> Enum.reduce({q, vis}, fn t, {q2, vis2} ->
-                if MapSet.member?(vis2, t) do
-                  {q2, vis2}
-                else
-                  {:queue.in({t, path ++ [action]}, q2), MapSet.put(vis2, t)}
-                end
-              end)
-            end)
-
-          bfs(graph, new_queue, new_visited, internal, actions, target)
+          {:queue.in(alias_state, q), Map.put(par, alias_state, {from, action})}
         end
+      end)
+    end
+  end
+
+  # Walks parent pointers backward from `state`, prepending each action as it
+  # goes — by construction this yields the actions in forward order with no
+  # list concatenation (`++`) anywhere in the walk.
+  defp reconstruct_path(parents, state), do: reconstruct_path(parents, state, [])
+
+  defp reconstruct_path(parents, state, acc) do
+    case Map.fetch(parents, state) do
+      :error -> nil
+      {:ok, :root} -> acc
+      {:ok, {prev, action}} -> reconstruct_path(parents, prev, [action | acc])
     end
   end
 
   @doc """
-  Builds the spec-guided generator (Outlaw design spec §5.1): each value
-  picks a target transition uniformly among all graph edges (internal
-  included), emits the shortest external-action path to its source (skipping
-  targets unreachable via external actions), then the target action (if
-  external) or a `:settle` point (if internal), then continues with a random
-  walk up to `max_steps` total items.
-
-  `actions` is the mapping's `actions/0` map. `opts`:
+  Builds the spec-guided generator (Outlaw design spec §5.1 — see the
+  moduledoc for why the generator is shaped the way it is). `actions` is the
+  mapping's `actions/0` map. `opts`:
     * `:internal` — declared internal action names (default `[]`).
     * `:fair` — `MapSet` of the declared internal actions the spec marks fair
-      (default `MapSet.new()`); after an emitted action makes one of these
-      enabled somewhere in the possible set, the next item is `:settle` with
-      probability 1/2.
+      (default `MapSet.new()`).
     * `:max_steps` — default `Outlaw.Config.get(:max_steps)`.
-
-  Shortest paths are memoized in a plain map built once here (keyed by
-  source state, since every edge out of the same state shares the same
-  path), not in any process-wide or persistent cache.
   """
   @spec generator(StateGraph.t(), %{String.t() => StreamData.t(map())}, keyword()) ::
           StreamData.t([{String.t(), map()} | :settle])
@@ -132,171 +196,155 @@ defmodule Outlaw.Conformance.Walk do
     fair = Keyword.get(opts, :fair, MapSet.new())
     max_steps = Keyword.get(opts, :max_steps, Config.get(:max_steps))
     external_actions = actions |> Map.keys() |> Enum.sort()
+    allowed_actions = MapSet.new(external_actions ++ internal)
     closed_initial = closure(graph, StateGraph.initial_states(graph), internal)
-    edges = StateGraph.edges(graph)
-
-    path_cache =
-      edges
-      |> Enum.map(&elem(&1, 0))
-      |> Enum.uniq()
-      |> Map.new(&{&1, shortest_path(graph, closed_initial, &1, external_actions)})
+    parents = bfs_parents(graph, closed_initial, internal, external_actions)
 
     entries =
-      edges
-      |> Enum.map(fn {from, action, _to} -> {Map.fetch!(path_cache, from), action} end)
+      graph
+      |> StateGraph.edges()
+      |> Enum.filter(fn {_from, action, _to} -> MapSet.member?(allowed_actions, action) end)
+      |> Enum.map(fn {from, action, _to} -> {reconstruct_path(parents, from), action} end)
       |> Enum.reject(fn {path, _action} -> is_nil(path) end)
 
-    case entries do
-      [] ->
-        StreamData.constant([])
+    raw_gen =
+      StreamData.fixed_map(%{
+        targeted?: StreamData.boolean(),
+        target_index: StreamData.non_negative_integer(),
+        tokens: StreamData.list_of(token_generator(actions), max_length: max_steps)
+      })
 
-      _ ->
-        StreamData.bind(StreamData.member_of(entries), fn {path, target_action} ->
-          target_value(
-            graph,
-            actions,
-            external_actions,
-            internal,
-            fair,
-            closed_initial,
-            path,
-            target_action,
-            max_steps
-          )
-        end)
-    end
+    StreamData.map(raw_gen, fn raw ->
+      fold(graph, actions, external_actions, internal, fair, closed_initial, entries, raw)
+    end)
   end
 
-  # -- target: shortest path + target action/settle, then the random walk ----
+  defp token_generator(actions) do
+    StreamData.fixed_map(%{
+      bucket:
+        StreamData.frequency([
+          {80, StreamData.constant(:enabled)},
+          {15, StreamData.constant(:disabled)},
+          {5, StreamData.constant(:settle)}
+        ]),
+      pick_index: StreamData.non_negative_integer(),
+      settle_bias: StreamData.boolean(),
+      params: StreamData.fixed_map(actions)
+    })
+  end
 
-  defp target_value(
-         graph,
-         actions,
-         external_actions,
-         internal,
-         fair,
-         closed_initial,
-         path,
-         target_action,
-         max_steps
-       ) do
-    names =
-      if Map.has_key?(actions, target_action),
-        do: path ++ [target_action],
-        else: path ++ [:settle]
+  # -- fold: raw {targeted?, target_index, tokens} -> [{name, params} | :settle] --
 
-    take_count = min(max_steps, length(names))
-    prefix_names = Enum.take(names, take_count)
+  defp fold(graph, actions, external_actions, internal, fair, closed_initial, entries, raw) do
+    %{targeted?: targeted?, target_index: target_index, tokens: tokens} = raw
 
-    possible_after =
-      Enum.reduce(prefix_names, closed_initial, &apply_name(graph, internal, &2, &1))
+    {prefix_names, prefix_tokens, rest_tokens} =
+      prefix_plan(actions, entries, targeted?, target_index, tokens)
 
-    remaining = max_steps - take_count
-
-    force_initial? =
-      case List.last(prefix_names) do
-        nil -> false
-        :settle -> false
-        _ -> any_fair_enabled?(graph, possible_after, fair)
-      end
-
-    prefix_gen =
+    {prefix_items, {possible_after, force_initial?}} =
       prefix_names
-      |> Enum.map(fn
-        :settle -> StreamData.constant(:settle)
-        name -> StreamData.map(Map.fetch!(actions, name), &{name, &1})
+      |> Enum.zip(prefix_tokens)
+      |> Enum.map_reduce({closed_initial, false}, fn
+        {:settle, _token}, {possible, _force?} ->
+          {:settle, {possible, false}}
+
+        {name, token}, {possible, _force?} ->
+          params = Map.fetch!(token.params, name)
+          was_enabled? = any_fair_enabled?(graph, possible, fair)
+          new_possible = advance(graph, possible, name, internal)
+          now_enabled? = any_fair_enabled?(graph, new_possible, fair)
+          {{name, params}, {new_possible, now_enabled? and not was_enabled?}}
       end)
-      |> StreamData.fixed_list()
 
-    continuation_gen =
-      continuation(
-        graph,
-        actions,
-        external_actions,
-        internal,
-        fair,
-        possible_after,
-        remaining,
-        force_initial?
-      )
+    {continuation_rev, _possible, _force?} =
+      Enum.reduce(rest_tokens, {[], possible_after, force_initial?}, fn token,
+                                                                        {acc, possible, force?} ->
+        {item, new_possible, new_force?} =
+          resolve_token(graph, external_actions, internal, fair, possible, force?, token)
 
-    StreamData.map(StreamData.tuple({prefix_gen, continuation_gen}), fn {p, c} -> p ++ c end)
-  end
-
-  defp apply_name(_graph, _internal, possible, :settle), do: possible
-  defp apply_name(graph, internal, possible, name), do: advance(graph, possible, name, internal)
-
-  # -- continue: random walk up to max_steps total items ----------------------
-
-  defp continuation(_graph, _actions, _external, _internal, _fair, _possible, remaining, _force?)
-       when remaining <= 0 do
-    StreamData.constant([])
-  end
-
-  defp continuation(graph, actions, external_actions, internal, fair, possible, remaining, force?) do
-    next_item_generator(graph, actions, external_actions, possible, force?)
-    |> StreamData.bind(fn item ->
-      {new_possible, new_force?} = apply_item(graph, internal, fair, possible, item)
-
-      continuation(
-        graph,
-        actions,
-        external_actions,
-        internal,
-        fair,
-        new_possible,
-        remaining - 1,
-        new_force?
-      )
-      |> StreamData.bind(&StreamData.constant([item | &1]))
-    end)
-  end
-
-  defp apply_item(_graph, _internal, _fair, possible, :settle), do: {possible, false}
-
-  defp apply_item(graph, internal, fair, possible, {name, _params}) do
-    new_possible = advance(graph, possible, name, internal)
-    {new_possible, any_fair_enabled?(graph, new_possible, fair)}
-  end
-
-  defp next_item_generator(graph, actions, external_actions, possible, force?) do
-    normal_gen = fn -> weighted_item_generator(graph, actions, external_actions, possible) end
-
-    if force? do
-      StreamData.bind(StreamData.member_of([:force, :skip]), fn
-        :force -> StreamData.constant(:settle)
-        :skip -> normal_gen.()
+        {[item | acc], new_possible, new_force?}
       end)
+
+    prefix_items ++ Enum.reverse(continuation_rev)
+  end
+
+  # Only if `targeted?` and there's at least one reachable, declared-action
+  # entry: picks one uniformly (via `target_index mod length(entries)`),
+  # builds its deterministic name sequence (shortest path, then the target
+  # action or `:settle` if the target action is internal), and truncates it
+  # to however many tokens are actually available (shrinking `tokens` below
+  # the prefix's natural length just truncates the run early, same as
+  # running out of `max_steps`).
+  defp prefix_plan(actions, entries, targeted?, target_index, tokens) do
+    if targeted? and entries != [] do
+      {path, target_action} = Enum.at(entries, rem(target_index, length(entries)))
+
+      names =
+        if Map.has_key?(actions, target_action),
+          do: path ++ [target_action],
+          else: path ++ [:settle]
+
+      take = min(length(names), length(tokens))
+      prefix_names = Enum.take(names, take)
+      {prefix_tokens, rest_tokens} = Enum.split(tokens, take)
+      {prefix_names, prefix_tokens, rest_tokens}
     else
-      normal_gen.()
+      {[], [], tokens}
     end
   end
 
-  defp weighted_item_generator(graph, actions, external_actions, possible) do
-    enabled = Enum.filter(external_actions, &enabled_somewhere?(graph, possible, &1))
-    disabled = external_actions -- enabled
+  # -- continuation: one token -> one item, weighted by the current P --------
 
-    enabled_bucket = action_bucket(80, enabled, disabled, actions)
-    disabled_bucket = action_bucket(15, disabled, enabled, actions)
-    settle_bucket = {5, StreamData.constant(:settle)}
-
-    [enabled_bucket, disabled_bucket, settle_bucket]
-    |> Enum.reject(&is_nil/1)
-    |> StreamData.frequency()
+  defp resolve_token(graph, external_actions, internal, fair, possible, force?, token) do
+    item = pick_item(graph, external_actions, possible, force?, token)
+    was_enabled? = any_fair_enabled?(graph, possible, fair)
+    new_possible = apply_item(graph, internal, possible, item)
+    now_enabled? = any_fair_enabled?(graph, new_possible, fair)
+    {item, new_possible, now_enabled? and not was_enabled?}
   end
 
-  defp action_bucket(weight, primary, fallback, actions) do
-    case {primary, fallback} do
-      {[], []} -> nil
-      {[], _} -> {weight, action_generator(actions, fallback)}
-      {_, _} -> {weight, action_generator(actions, primary)}
+  defp apply_item(_graph, _internal, possible, :settle), do: possible
+
+  defp apply_item(graph, internal, possible, {name, _params}),
+    do: advance(graph, possible, name, internal)
+
+  defp pick_item(graph, external_actions, possible, force?, token) do
+    if force? and token.settle_bias do
+      :settle
+    else
+      enabled = Enum.filter(external_actions, &enabled_somewhere?(graph, possible, &1))
+      disabled = external_actions -- enabled
+
+      case resolve_bucket(token.bucket, enabled, disabled) do
+        :settle ->
+          :settle
+
+        names ->
+          name = Enum.at(names, rem(token.pick_index, length(names)))
+          {name, Map.fetch!(token.params, name)}
+      end
     end
   end
 
-  defp action_generator(actions, names) do
-    StreamData.bind(StreamData.member_of(names), fn name ->
-      StreamData.map(Map.fetch!(actions, name), &{name, &1})
-    end)
+  # Weights 80 enabled-somewhere-in-P (if none, fall back to disabled), 15
+  # disabled-everywhere-in-P (if none, fall back to enabled), 5 settle —
+  # Outlaw design spec §5.1's "Continue" weights.
+  defp resolve_bucket(:settle, _enabled, _disabled), do: :settle
+
+  defp resolve_bucket(:enabled, enabled, disabled) do
+    cond do
+      enabled != [] -> enabled
+      disabled != [] -> disabled
+      true -> :settle
+    end
+  end
+
+  defp resolve_bucket(:disabled, enabled, disabled) do
+    cond do
+      disabled != [] -> disabled
+      enabled != [] -> enabled
+      true -> :settle
+    end
   end
 
   defp enabled_somewhere?(graph, possible, action),
