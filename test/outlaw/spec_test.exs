@@ -32,6 +32,56 @@ defmodule Outlaw.SpecTest do
     assert spec.cfg_path == Path.join(dir, "Bank.cfg")
   end
 
+  test "fair_actions extracts the name inside WF_/SF_(...), across subscript forms", %{
+    tmp_dir: dir
+  } do
+    write(dir, [
+      {"X.tla",
+       ~S"""
+       ---- MODULE X ----
+       VARIABLE status
+       Spec == Init /\ [][Next]_status /\ WF_status(Reap)
+               /\ SF_<<x, y>>(Kill)
+               /\ \A u \in U : WF_vars(Pay(u))
+       ====
+       """}
+    ])
+
+    spec = Spec.from_path(Path.join(dir, "X.tla"))
+    assert Spec.fair_actions(spec) == MapSet.new(["Reap", "Kill", "Pay"])
+  end
+
+  test "fair_actions strips \\* line comments and (* *) block comments first", %{tmp_dir: dir} do
+    write(dir, [
+      {"X.tla",
+       ~S"""
+       ---- MODULE X ----
+       \* WF_vars(FromLineComment) should not count
+       (* WF_vars(FromBlockComment)
+          spans multiple lines *)
+       Spec == WF_vars(Real)
+       ====
+       """}
+    ])
+
+    spec = Spec.from_path(Path.join(dir, "X.tla"))
+    assert Spec.fair_actions(spec) == MapSet.new(["Real"])
+  end
+
+  test "fair_actions returns names even when they are not actual graph actions (e.g. Next)", %{
+    tmp_dir: dir
+  } do
+    write(dir, [
+      {"X.tla",
+       ~S"""
+       Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
+       """}
+    ])
+
+    spec = Spec.from_path(Path.join(dir, "X.tla"))
+    assert Spec.fair_actions(spec) == MapSet.new(["Next"])
+  end
+
   test "content hash changes with the spec, its cfg, or a sibling module", %{tmp_dir: dir} do
     write(dir, [{"A.tla", "a"}, {"A.cfg", "c"}, {"Helper.tla", "h"}])
     {:ok, spec} = Spec.fetch("A", dir)

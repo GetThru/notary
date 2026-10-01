@@ -68,6 +68,44 @@ defmodule Outlaw.Spec do
     |> Base.encode16(case: :lower)
   end
 
+  @doc """
+  Every action name the spec's text marks weakly or strongly fair: the first
+  identifier inside the parentheses of each `WF_<sub>(...)` / `SF_<sub>(...)`
+  occurrence, where `<sub>` is a plain identifier (`WF_vars(Reap)`) or a tuple
+  of variables (`WF_<<x, y>>(Reap)`). `WF_vars(Pay(u))` and
+  `\\A u \\in U : WF_vars(Pay(u))` both yield `"Pay"` — only the identifier
+  immediately inside the outer parentheses is taken, so a call's own
+  arguments are ignored. TLA comments (`\\*` to end of line, and `(* ... *)`
+  blocks) are stripped first.
+
+  This is a syntactic scan of the spec's text, not a semantic one: a name
+  found here that is not actually a graph action (e.g. `WF_vars(Next)` --
+  `Next` is the whole-step formula, not an edge label) is simply harmless
+  wherever the result is used, since callers only care about its
+  intersection with real action names (e.g. `Outlaw.Conformance`'s declared
+  `internal:` actions).
+  """
+  @fairness ~r/\b(?:WF|SF)_(?:<<[^>]*>>|[A-Za-z_][A-Za-z0-9_]*)\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)/
+
+  @spec fair_actions(t()) :: MapSet.t(String.t())
+  def fair_actions(%__MODULE__{tla_path: tla_path}) do
+    tla_path
+    |> File.read!()
+    |> strip_block_comments()
+    |> strip_line_comments()
+    |> then(&Regex.scan(@fairness, &1))
+    |> Enum.map(fn [_, name] -> name end)
+    |> MapSet.new()
+  end
+
+  defp strip_block_comments(text), do: Regex.replace(~r/\(\*.*?\*\)/s, text, "")
+
+  defp strip_line_comments(text) do
+    text
+    |> String.split("\n")
+    |> Enum.map_join("\n", &(&1 |> String.split("\\*") |> hd()))
+  end
+
   defp new(tla, cfg) do
     %__MODULE__{
       name: Path.basename(tla, ".tla"),
