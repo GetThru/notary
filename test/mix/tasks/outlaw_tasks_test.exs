@@ -88,10 +88,19 @@ defmodule Mix.Tasks.OutlawTasksTest do
           assert conf["internal"] == []
           assert conf["fair"] == []
       end
+
+      assert %{
+               "actions" => %{"reached" => _, "total" => _, "unreached" => _},
+               "states" => %{"reached" => _, "total" => _, "unreached" => _},
+               "transitions" => %{"reached" => _, "total" => _, "unreached" => _}
+             } = conf["coverage"]
     end
 
     async_text = run_task("outlaw.test", ["Async", "--seed", "7", "--max-runs", "30"]) |> elem(0)
     assert async_text =~ "conformance: pass (30 runs, seed 7; internal: Complete*; * = fair)"
+
+    assert async_text =~
+             ~r/coverage: actions \d+\/\d+, observed states \d+\/\d+, transitions \d+\/\d+/
   end
 
   test "outlaw.test still reports a conformance failure when the failure artifact can't be written",

@@ -231,6 +231,129 @@ defmodule Outlaw.ReportTest do
     refute text =~ "internal:"
   end
 
+  @full_coverage %{
+    actions: %{reached: 9, total: 9, unreached: []},
+    states: %{reached: 29, total: 29, unreached: []},
+    transitions: %{reached: 52, total: 57, unreached: [{%{"x" => 1}, "Inc", %{"x" => 2}}]}
+  }
+
+  @gappy_coverage %{
+    actions: %{reached: 8, total: 9, unreached: ["LimitKill"]},
+    states: %{reached: 27, total: 29, unreached: [%{"x" => 5}, %{"x" => 9}]},
+    transitions: %{reached: 52, total: 57, unreached: [{%{"x" => 1}, "Inc", %{"x" => 2}}]}
+  }
+
+  test "a passing conformance stage shows the coverage line" do
+    text =
+      report(
+        [
+          %{
+            stage: :conformance,
+            status: :pass,
+            payload: {:ok, %{runs: 100, seed: 7, coverage: @full_coverage}},
+            internal: [],
+            fair: []
+          }
+        ],
+        :pass
+      )
+      |> Report.format()
+
+    assert text =~ "conformance: pass (100 runs, seed 7)"
+    assert text =~ "coverage: actions 9/9, observed states 29/29, transitions 52/57"
+    refute text =~ "warning:"
+  end
+
+  test "coverage gaps add warning lines but the stage stays pass" do
+    report_map =
+      report(
+        [
+          %{
+            stage: :conformance,
+            status: :pass,
+            payload: {:ok, %{runs: 100, seed: 7, coverage: @gappy_coverage}},
+            internal: [],
+            fair: []
+          }
+        ],
+        :pass
+      )
+
+    text = Report.format(report_map)
+
+    assert text =~ "coverage: actions 8/9, observed states 27/29, transitions 52/57"
+    assert text =~ "warning: never reached: LimitKill"
+    assert text =~ "warning: 2 observed states never reached (first: x = 5)"
+
+    [spec] = report_map.specs
+    [stage] = spec.stages
+    assert stage.status == :pass
+  end
+
+  test "a passing conformance stage without a coverage key renders no coverage line" do
+    text =
+      report(
+        [
+          %{
+            stage: :conformance,
+            status: :pass,
+            payload: {:ok, %{runs: 100, seed: 7}},
+            internal: [],
+            fair: []
+          }
+        ],
+        :pass
+      )
+      |> Report.format()
+
+    assert text =~ "conformance: pass (100 runs, seed 7)"
+    refute text =~ "coverage:"
+  end
+
+  test "to_json renders coverage with TLA+ text state projections and from/action/to transitions" do
+    json =
+      report([
+        %{
+          stage: :conformance,
+          status: :pass,
+          payload: {:ok, %{runs: 100, seed: 7, coverage: @gappy_coverage}},
+          internal: [],
+          fair: []
+        }
+      ])
+      |> Report.to_json()
+
+    [stage] = hd(json["specs"])["stages"]
+    coverage = stage["coverage"]
+
+    assert coverage["actions"] == %{"reached" => 8, "total" => 9, "unreached" => ["LimitKill"]}
+    assert coverage["states"]["unreached"] == [%{"x" => "5"}, %{"x" => "9"}]
+
+    assert coverage["transitions"]["unreached"] == [
+             %{"from" => %{"x" => "1"}, "action" => "Inc", "to" => %{"x" => "2"}}
+           ]
+
+    encoded = JSON.encode!(json)
+    assert is_binary(encoded)
+  end
+
+  test "to_json omits coverage when the payload has none" do
+    json =
+      report([
+        %{
+          stage: :conformance,
+          status: :pass,
+          payload: {:ok, %{runs: 100, seed: 7}},
+          internal: [],
+          fair: []
+        }
+      ])
+      |> Report.to_json()
+
+    [stage] = hd(json["specs"])["stages"]
+    refute Map.has_key?(stage, "coverage")
+  end
+
   test "to_json includes internal/fair on the conformance stage" do
     json =
       report([

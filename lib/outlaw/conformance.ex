@@ -125,7 +125,12 @@ defmodule Outlaw.Conformance do
   end
 
   @spec check(module(), StateGraph.t(), keyword()) ::
-          {:ok, %{runs: non_neg_integer(), seed: integer()}}
+          {:ok,
+           %{
+             runs: non_neg_integer(),
+             seed: integer(),
+             coverage: Outlaw.Conformance.Coverage.summary()
+           }}
           | {:error, Outlaw.Conformance.Failure.t()}
           | {:error, Error.t()}
   def check(module, %StateGraph{} = graph, opts \\ []) do

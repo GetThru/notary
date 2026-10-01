@@ -45,9 +45,15 @@ defmodule Outlaw.Report do
 
   defp format_stage(
          _name,
-         %{stage: :conformance, payload: {:ok, %{runs: runs, seed: seed}}} = stage
-       ),
-       do: "  conformance: pass (#{runs} runs, seed #{seed}#{internal_suffix(stage)})"
+         %{stage: :conformance, payload: {:ok, %{runs: runs, seed: seed} = payload}} = stage
+       ) do
+    header = "  conformance: pass (#{runs} runs, seed #{seed}#{internal_suffix(stage)})"
+
+    case payload do
+      %{coverage: coverage} -> header <> "\n" <> format_coverage(coverage)
+      _ -> header
+    end
+  end
 
   defp format_stage(name, %{stage: stage, status: status, payload: payload}) do
     body =
@@ -78,6 +84,31 @@ defmodule Outlaw.Report do
   end
 
   defp mark_fair(name, fair), do: if(name in fair, do: name <> "*", else: name)
+
+  # Coverage line + gap warnings under a passing conformance stage (Outlaw
+  # design spec §5.2). Gaps are warnings only -- they never change the
+  # stage's `pass` status.
+  defp format_coverage(%{actions: a, states: s, transitions: t}) do
+    line =
+      "    coverage: actions #{a.reached}/#{a.total}, " <>
+        "observed states #{s.reached}/#{s.total}, transitions #{t.reached}/#{t.total}"
+
+    [line, action_warning(a), state_warning(s)]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join("\n")
+  end
+
+  defp action_warning(%{unreached: []}), do: nil
+
+  defp action_warning(%{unreached: unreached}),
+    do: "    warning: never reached: #{Enum.join(unreached, ", ")}"
+
+  defp state_warning(%{reached: reached, total: total}) when reached == total, do: nil
+
+  defp state_warning(%{reached: reached, total: total, unreached: unreached}) do
+    "    warning: #{total - reached} observed states never reached " <>
+      "(first: #{format_state(List.first(unreached))})"
+  end
 
   # Outlaw.Error.details can carry context that doesn't make it into `message`
   # (e.g. the last output lines on a TLC timeout, or the raw text behind an
@@ -224,12 +255,40 @@ defmodule Outlaw.Report do
   defp stage_json(%{stage: stage, status: status, payload: payload} = s) do
     extra =
       if stage == :conformance,
-        do: %{"internal" => Map.get(s, :internal, []), "fair" => Map.get(s, :fair, [])},
+        do: conformance_extra_json(s, payload),
         else: %{}
 
     %{"stage" => Atom.to_string(stage), "status" => Atom.to_string(status)}
     |> Map.merge(extra)
     |> Map.merge(payload_json(payload))
+  end
+
+  defp conformance_extra_json(s, payload) do
+    base = %{"internal" => Map.get(s, :internal, []), "fair" => Map.get(s, :fair, [])}
+
+    case payload do
+      {:ok, %{coverage: coverage}} -> Map.put(base, "coverage", coverage_json(coverage))
+      _ -> base
+    end
+  end
+
+  defp coverage_json(%{actions: a, states: s, transitions: t}) do
+    %{
+      "actions" => %{"reached" => a.reached, "total" => a.total, "unreached" => a.unreached},
+      "states" => %{
+        "reached" => s.reached,
+        "total" => s.total,
+        "unreached" => Enum.map(s.unreached, &state_json/1)
+      },
+      "transitions" => %{
+        "reached" => t.reached,
+        "total" => t.total,
+        "unreached" =>
+          Enum.map(t.unreached, fn {from, action, to} ->
+            %{"from" => state_json(from), "action" => action, "to" => state_json(to)}
+          end)
+      }
+    }
   end
 
   defp payload_json(:ok), do: %{}

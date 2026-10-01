@@ -30,6 +30,28 @@ defmodule Outlaw.Conformance.RunnerTest do
     end
   end
 
+  describe "coverage (Outlaw design spec §5.2)" do
+    test "Counter: actions 2/2, observed states 4/4" do
+      assert {:ok, %{coverage: coverage}} = check(Fixtures.CounterSpec, "Counter")
+      assert coverage.actions == %{reached: 2, total: 2, unreached: []}
+      assert coverage.states == %{reached: 4, total: 4, unreached: []}
+      assert coverage.transitions.reached == coverage.transitions.total
+    end
+
+    test "Bank: observed states total 4 (balances 0..3), not 7 (balance x lastOp)" do
+      assert {:ok, %{coverage: coverage}} = check(Fixtures.BankSpec, "Bank")
+      assert coverage.states.total == 4
+      assert coverage.states.reached == 4
+    end
+
+    test "Async: the internal action Complete is counted reached" do
+      assert {:ok, %{coverage: coverage}} = check(Fixtures.AsyncSpec, "Async")
+      assert coverage.actions.total == 2
+      assert coverage.actions.reached == 2
+      refute "Complete" in coverage.actions.unreached
+    end
+  end
+
   describe "internal actions" do
     test "a wrong completion target fails (illegal_transition or rejected_with_side_effect)" do
       assert {:error, %Failure{kind: kind}} = check(Fixtures.AsyncWrongCompletionSpec, "Async")

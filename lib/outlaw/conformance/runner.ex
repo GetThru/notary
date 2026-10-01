@@ -7,7 +7,7 @@ defmodule Outlaw.Conformance.Runner do
   """
 
   alias Outlaw.{Config, StateGraph, Value}
-  alias Outlaw.Conformance.{Failure, Step, Walk}
+  alias Outlaw.Conformance.{Coverage, Failure, Step, Walk}
 
   @default_max_replays 200
   @spec_level_kinds [
@@ -18,7 +18,8 @@ defmodule Outlaw.Conformance.Runner do
   ]
 
   @spec check(module(), StateGraph.t(), [String.t()], keyword()) ::
-          {:ok, %{runs: non_neg_integer(), seed: integer()}} | {:error, Failure.t()}
+          {:ok, %{runs: non_neg_integer(), seed: integer(), coverage: Coverage.summary()}}
+          | {:error, Failure.t()}
   def check(module, graph, observe, opts) do
     seed = Keyword.get_lazy(opts, :seed, fn -> :rand.uniform(1_000_000) end)
     max_runs = Keyword.get(opts, :max_runs, Config.get(:max_runs))
@@ -28,34 +29,51 @@ defmodule Outlaw.Conformance.Runner do
     internal = Map.get(module.__outlaw__(), :internal, [])
     fair = Keyword.get(opts, :fair, MapSet.new())
     generation = Map.get(module.__outlaw__(), :generation, :walk)
+    actions = module.actions()
 
     generator = generator(generation, module, graph, internal, fair, max_steps)
     options = [initial_seed: {0, 0, seed}, max_runs: max_runs, max_shrinking_steps: 500]
 
-    result =
-      StreamData.check_all(generator, options, fn items ->
-        case run(module, graph, observe, internal, fair, items, timeout, settle_timeout) do
-          {:ok, _steps} -> {:ok, nil}
-          {:error, failure} -> {:error, {items, failure}}
-        end
-      end)
+    # Coverage is accumulated in a short-lived Agent scoped to this call (not
+    # the process dictionary or a module-level accumulator), so concurrent
+    # `check/4` calls (e.g. ExUnit async tests) never share or clobber each
+    # other's totals; it's always stopped below, success or failure.
+    {:ok, coverage_agent} =
+      Agent.start_link(fn -> Coverage.new(graph, observe, internal, Map.keys(actions)) end)
 
-    case result do
-      {:ok, _} ->
-        {:ok, %{runs: max_runs, seed: seed}}
+    try do
+      result =
+        StreamData.check_all(generator, options, fn items ->
+          case run(module, graph, observe, internal, fair, items, timeout, settle_timeout) do
+            {:ok, steps} ->
+              Agent.update(coverage_agent, &Coverage.add_run(&1, steps))
+              {:ok, nil}
 
-      {:error, %{shrunk_failure: {items, failure}}} ->
-        replay = &run(module, graph, observe, internal, fair, &1, timeout, settle_timeout)
+            {:error, failure} ->
+              {:error, {items, failure}}
+          end
+        end)
 
-        {_items, failure, stats} =
-          minimize(items, failure, replay,
-            seed: seed,
-            actions: module.actions(),
-            max_replays: Keyword.get(opts, :max_replays, @default_max_replays)
-          )
+      case result do
+        {:ok, _} ->
+          coverage = Agent.get(coverage_agent, &Coverage.summary/1)
+          {:ok, %{runs: max_runs, seed: seed, coverage: coverage}}
 
-        details = Map.put(failure.details, :minimized, format_stats(stats))
-        {:error, %{failure | seed: seed, details: details}}
+        {:error, %{shrunk_failure: {items, failure}}} ->
+          replay = &run(module, graph, observe, internal, fair, &1, timeout, settle_timeout)
+
+          {_items, failure, stats} =
+            minimize(items, failure, replay,
+              seed: seed,
+              actions: actions,
+              max_replays: Keyword.get(opts, :max_replays, @default_max_replays)
+            )
+
+          details = Map.put(failure.details, :minimized, format_stats(stats))
+          {:error, %{failure | seed: seed, details: details}}
+      end
+    after
+      Agent.stop(coverage_agent)
     end
   end
 
