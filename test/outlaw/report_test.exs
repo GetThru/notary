@@ -141,11 +141,91 @@ defmodule Outlaw.ReportTest do
     assert text =~ "mix outlaw.graph Bank --trace failure"
   end
 
+  test "format_failure renders a (settle) step without trailing params when params is nil" do
+    failure = %Failure{
+      kind: :internal_action_stalled,
+      seed: 9,
+      steps: [
+        %Step{index: 0, outcome: :ok, projection: %{"status" => "idle"}, allowed: []},
+        %Step{
+          index: 1,
+          action: "(settle)",
+          params: nil,
+          outcome: :ok,
+          projection: %{"status" => "pending"},
+          allowed: []
+        }
+      ],
+      details: %{pending: ["Complete"], settle_timeout: 50}
+    }
+
+    text = Report.format_failure("Async", failure)
+    assert text =~ "(settle)"
+    refute text =~ "(settle) nil"
+  end
+
   test "format_violation shows the counterexample" do
     text = Report.format_violation("Inv", @violation)
     assert text =~ "TLC found a violation in Inv: Invariant Small is violated. (invariant)"
     assert text =~ "1. (initial)  x = 0"
     assert text =~ "2. Next  x = 1"
+  end
+
+  test "a passing conformance stage shows declared internal actions and marks the fair ones" do
+    text =
+      report(
+        [
+          %{
+            stage: :conformance,
+            status: :pass,
+            payload: {:ok, %{runs: 100, seed: 7}},
+            internal: ["LimitKill", "Reap"],
+            fair: ["Reap"]
+          }
+        ],
+        :pass
+      )
+      |> Report.format()
+
+    assert text =~ "conformance: pass (100 runs, seed 7; internal: LimitKill, Reap*; * = fair)"
+  end
+
+  test "a passing conformance stage with no internal actions shows no internal suffix" do
+    text =
+      report(
+        [
+          %{
+            stage: :conformance,
+            status: :pass,
+            payload: {:ok, %{runs: 100, seed: 7}},
+            internal: [],
+            fair: []
+          }
+        ],
+        :pass
+      )
+      |> Report.format()
+
+    assert text =~ "conformance: pass (100 runs, seed 7)"
+    refute text =~ "internal:"
+  end
+
+  test "to_json includes internal/fair on the conformance stage" do
+    json =
+      report([
+        %{
+          stage: :conformance,
+          status: :pass,
+          payload: {:ok, %{runs: 100, seed: 7}},
+          internal: ["LimitKill", "Reap"],
+          fair: ["Reap"]
+        }
+      ])
+      |> Report.to_json()
+
+    [stage] = hd(json["specs"])["stages"]
+    assert stage["internal"] == ["LimitKill", "Reap"]
+    assert stage["fair"] == ["Reap"]
   end
 
   test "format summarises all stages" do

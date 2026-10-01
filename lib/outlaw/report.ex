@@ -5,9 +5,11 @@ defmodule Outlaw.Report do
   alias Outlaw.Conformance.{Failure, Step}
 
   @type stage :: %{
-          stage: :lock | :check | :conformance,
-          status: :pass | :fail | :error | :skipped,
-          payload: term()
+          required(:stage) => :lock | :check | :conformance,
+          required(:status) => :pass | :fail | :error | :skipped,
+          required(:payload) => term(),
+          optional(:internal) => [String.t()],
+          optional(:fair) => [String.t()]
         }
   @type spec_result :: %{spec: String.t(), status: :pass | :fail, stages: [stage()]}
   @type report :: %{status: :pass | :fail, lock: stage() | nil, specs: [spec_result()]}
@@ -41,8 +43,11 @@ defmodule Outlaw.Report do
 
   defp format_stage(_name, %{stage: stage, status: :skipped}), do: "  #{stage}: skipped"
 
-  defp format_stage(_name, %{stage: :conformance, payload: {:ok, %{runs: runs, seed: seed}}}),
-    do: "  conformance: pass (#{runs} runs, seed #{seed})"
+  defp format_stage(
+         _name,
+         %{stage: :conformance, payload: {:ok, %{runs: runs, seed: seed}}} = stage
+       ),
+       do: "  conformance: pass (#{runs} runs, seed #{seed}#{internal_suffix(stage)})"
 
   defp format_stage(name, %{stage: stage, status: status, payload: payload}) do
     body =
@@ -54,6 +59,25 @@ defmodule Outlaw.Report do
 
     "  #{stage}: #{status}\n" <> indent(body, 4)
   end
+
+  # Shows the mapping's declared internal actions on a conformance stage, with
+  # a trailing `*` on the ones the spec marks fair (Outlaw.Spec.fair_actions/1,
+  # design spec §4.3) -- e.g. "; internal: LimitKill, Reap*; * = fair". Empty
+  # (or absent, for stages that never reached a mapping) renders nothing.
+  defp internal_suffix(stage) do
+    case Map.get(stage, :internal, []) do
+      [] ->
+        ""
+
+      internal ->
+        fair = Map.get(stage, :fair, [])
+        names = internal |> Enum.sort() |> Enum.map_join(", ", &mark_fair(&1, fair))
+        footnote = if Enum.any?(internal, &(&1 in fair)), do: "; * = fair", else: ""
+        "; internal: #{names}#{footnote}"
+    end
+  end
+
+  defp mark_fair(name, fair), do: if(name in fair, do: name <> "*", else: name)
 
   # Outlaw.Error.details can carry context that doesn't make it into `message`
   # (e.g. the last output lines on a TLC timeout, or the raw text behind an
@@ -136,7 +160,12 @@ defmodule Outlaw.Report do
   end
 
   defp step_row(%Step{} = s, last?) do
-    action = if s.action, do: "#{s.action} #{inspect(s.params)}", else: "(init)"
+    action =
+      cond do
+        is_nil(s.action) -> "(init)"
+        is_nil(s.params) -> s.action
+        true -> "#{s.action} #{inspect(s.params)}"
+      end
 
     outcome =
       case s.outcome do
@@ -192,11 +221,15 @@ defmodule Outlaw.Report do
     }
   end
 
-  defp stage_json(%{stage: stage, status: status, payload: payload}) do
-    Map.merge(
-      %{"stage" => Atom.to_string(stage), "status" => Atom.to_string(status)},
-      payload_json(payload)
-    )
+  defp stage_json(%{stage: stage, status: status, payload: payload} = s) do
+    extra =
+      if stage == :conformance,
+        do: %{"internal" => Map.get(s, :internal, []), "fair" => Map.get(s, :fair, [])},
+        else: %{}
+
+    %{"stage" => Atom.to_string(stage), "status" => Atom.to_string(status)}
+    |> Map.merge(extra)
+    |> Map.merge(payload_json(payload))
   end
 
   defp payload_json(:ok), do: %{}

@@ -47,19 +47,23 @@ defmodule Outlaw.Verify do
   defp conformance_stage(spec, graph, mappings, opts) do
     case Map.fetch(mappings, spec.name) do
       :error ->
-        stage(:conformance, :fail, {:error, missing_mapping(spec)})
+        stage(:conformance, :fail, {:error, missing_mapping(spec)}, %{internal: [], fair: []})
 
       {:ok, module} ->
+        internal = Conformance.internal_actions(module)
+        fair = Conformance.fair_internal_actions(module)
+        extra = %{internal: internal, fair: fair}
+
         case Conformance.check(module, graph, Keyword.take(opts, @conformance_opts)) do
           {:ok, summary} ->
-            stage(:conformance, :pass, {:ok, summary})
+            stage(:conformance, :pass, {:ok, summary}, extra)
 
           {:error, %Failure{} = failure} ->
             write_failure_artifact(spec.name, graph, failure)
-            stage(:conformance, :fail, {:error, failure})
+            stage(:conformance, :fail, {:error, failure}, extra)
 
           {:error, %Error{} = error} ->
-            stage(:conformance, :error, {:error, error})
+            stage(:conformance, :error, {:error, error}, extra)
         end
     end
   end
@@ -95,5 +99,6 @@ defmodule Outlaw.Verify do
     %{spec: name, status: if(ok?, do: :pass, else: :fail), stages: stages}
   end
 
-  defp stage(name, status, payload), do: %{stage: name, status: status, payload: payload}
+  defp stage(name, status, payload, extra \\ %{}),
+    do: Map.merge(%{stage: name, status: status, payload: payload}, extra)
 end
