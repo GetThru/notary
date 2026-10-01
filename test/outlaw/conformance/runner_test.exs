@@ -101,6 +101,19 @@ defmodule Outlaw.Conformance.RunnerTest do
                check(Fixtures.CounterSlowSpec, "Counter", action_timeout: 50, max_runs: 20)
 
       assert during =~ "Inc"
+
+      # The many timeout-and-kill cycles above (one per shrink attempt) must
+      # not leave stray tagged progress/done messages from killed workers
+      # sitting in our mailbox.
+      Process.sleep(50)
+      assert {:message_queue_len, 0} = Process.info(self(), :message_queue_len)
+    end
+
+    test "teardown does not mislabel the failing step's details.during" do
+      assert {:error, %Failure{kind: :illegal_transition, details: details}} =
+               check(Fixtures.CounterBadResetTeardownSpec, "Counter")
+
+      refute to_string(details[:during]) =~ "teardown"
     end
   end
 
@@ -114,6 +127,10 @@ defmodule Outlaw.Conformance.RunnerTest do
     assert {:ok, _} = check(Fixtures.WorkflowSpec, "Workflow", max_runs: 50)
     Process.sleep(50)
     assert length(Process.list()) - before < 5
+  end
+
+  test "a named process from init is released before the next run's init/0" do
+    assert {:ok, _} = check(Fixtures.CounterNamedSpec, "Counter", max_runs: 50)
   end
 
   test "the generator emits only declared actions, up to max_steps" do

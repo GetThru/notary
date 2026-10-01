@@ -61,6 +61,56 @@ defmodule Outlaw.Fixtures.CounterBadResetSpec do
   def project(pid), do: %{"x" => Agent.get(pid, & &1)}
 end
 
+defmodule Outlaw.Fixtures.CounterBadResetTeardownSpec do
+  @moduledoc false
+  # Same bug as CounterBadResetSpec, but also has a teardown/1 — regression
+  # fixture for making sure teardown doesn't mislabel details.during on a
+  # spec-level failure (controller ruling R12, fix round 1, item 1).
+  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+
+  def init, do: Agent.start_link(fn -> 0 end)
+  def actions, do: %{"Reset" => StreamData.constant(%{})}
+
+  def action("Reset", _, pid) do
+    Agent.update(pid, fn _ -> 1 end)
+    {:ok, pid}
+  end
+
+  def project(pid), do: %{"x" => Agent.get(pid, & &1)}
+  def teardown(pid), do: Agent.stop(pid)
+end
+
+defmodule Outlaw.Fixtures.CounterNamedSpec do
+  @moduledoc false
+  # Regression fixture (controller ruling R12, fix round 1, item 3): init
+  # starts a *named* Agent and there's no teardown/1, so cleanup relies
+  # entirely on the runner's process-exit handling. If the runner doesn't
+  # guarantee the Agent is fully gone before the next run's init/0, a later
+  # run's `Agent.start_link(..., name: ...)` races and fails with
+  # `{:already_started, pid}`. Otherwise behaves exactly like CounterSpec.
+  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+
+  def init, do: Agent.start_link(fn -> %{x: 0, max: 3} end, name: Outlaw.Fixtures.NamedCounter)
+  def actions, do: %{"Inc" => StreamData.constant(%{}), "Reset" => StreamData.constant(%{})}
+
+  def action("Inc", _, pid) do
+    case Agent.get_and_update(pid, fn
+           %{x: x, max: max} = s when x < max -> {:ok, %{s | x: x + 1}}
+           s -> {{:error, :at_max}, s}
+         end) do
+      :ok -> {:ok, pid}
+      {:error, reason} -> {:rejected, reason, pid}
+    end
+  end
+
+  def action("Reset", _, pid) do
+    Agent.update(pid, &%{&1 | x: 0})
+    {:ok, pid}
+  end
+
+  def project(pid), do: %{"x" => Agent.get(pid, & &1.x)}
+end
+
 defmodule Outlaw.Fixtures.CounterSideEffectSpec do
   @moduledoc false
   # Bug: a rejected Inc still changes state.

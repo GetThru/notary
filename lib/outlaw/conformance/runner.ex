@@ -55,7 +55,9 @@ defmodule Outlaw.Conformance.Runner do
       spawn_monitor(fn ->
         Process.put(:"$callers", callers)
         notify = fn event -> send(parent, {ref, :progress, event}) end
-        send(parent, {ref, :done, execute(module, graph, observe, steps, notify)})
+        result = execute(module, graph, observe, steps, notify)
+        stop_linked_children(timeout)
+        send(parent, {ref, :done, result})
         exit(:shutdown)
       end)
 
@@ -69,15 +71,18 @@ defmodule Outlaw.Conformance.Runner do
       {^ref, :progress, {:started, label}} ->
         await(w, steps, label)
 
+      {^ref, :progress, :teardown_started} ->
+        await(w, steps, during)
+
       {^ref, :progress, {:step, step}} ->
         await(w, [step | steps], nil)
 
       {^ref, :done, :ok} ->
-        Process.demonitor(monitor, [:flush])
+        await_down(monitor, pid, w.timeout)
         {:ok, Enum.reverse(steps)}
 
       {^ref, :done, {:fail, kind, details}} ->
-        Process.demonitor(monitor, [:flush])
+        await_down(monitor, pid, w.timeout)
         {:error, Failure.new(kind, Enum.reverse(steps), Map.put_new(details, :during, during))}
 
       {:DOWN, ^monitor, :process, ^pid, reason} ->
@@ -87,13 +92,74 @@ defmodule Outlaw.Conformance.Runner do
       w.timeout ->
         Process.exit(pid, :kill)
         Process.demonitor(monitor, [:flush])
+        flush_ref(ref)
 
         {:error,
          Failure.new(:timeout, Enum.reverse(steps), %{during: during, timeout: w.timeout})}
     end
   end
 
+  # Waits for the worker's own :DOWN (it has already stopped its linked
+  # children by the time it sends :done, see `stop_linked_children/1`) so the
+  # next run's init/0 never races a still-dying worker or its process table
+  # entry. Bounded by `timeout` as a safety net; falls back to demonitor+flush
+  # if the DOWN is somehow delayed past that.
+  defp await_down(monitor, pid, timeout) do
+    receive do
+      {:DOWN, ^monitor, :process, ^pid, _reason} -> :ok
+    after
+      timeout -> Process.demonitor(monitor, [:flush])
+    end
+  end
+
+  # Drains any messages tagged with this run's ref still sitting in our
+  # mailbox after a timeout-kill, so they don't accumulate across shrink
+  # iterations (the worker may have queued more progress before it died).
+  defp flush_ref(ref) do
+    receive do
+      {^ref, _, _} -> flush_ref(ref)
+    after
+      0 -> :ok
+    end
+  end
+
   # -- worker -----------------------------------------------------------------
+
+  # After the run (and any teardown) finishes, forcibly stops whatever is
+  # still linked to this worker (processes an implementation's init/0 started
+  # with start_link and never stopped) and waits for confirmation that each
+  # one has actually exited, before this worker reports :done.
+  #
+  # This matters because exit-signal propagation from a dying process to its
+  # links is asynchronous relative to that process's own death: the parent
+  # (the test process) only monitors this worker, not its children, so by the
+  # time the parent sees *this* worker's :DOWN, a child (e.g. a named Agent)
+  # may not have processed its exit signal yet. Trapping exits here lets this
+  # worker itself wait for each child's `:EXIT` before signaling completion,
+  # so a name like `Outlaw.Fixtures.NamedCounter` is guaranteed free before
+  # the next run's init/0 tries to reuse it.
+  defp stop_linked_children(timeout) do
+    Process.flag(:trap_exit, true)
+
+    pids =
+      case Process.info(self(), :links) do
+        {:links, links} -> Enum.filter(links, &is_pid/1)
+        nil -> []
+      end
+
+    Enum.each(pids, &Process.exit(&1, :shutdown))
+    await_children_exit(pids, timeout)
+  end
+
+  defp await_children_exit([], _timeout), do: :ok
+
+  defp await_children_exit(pids, timeout) do
+    receive do
+      {:EXIT, pid, _reason} -> await_children_exit(List.delete(pids, pid), timeout)
+    after
+      timeout -> :ok
+    end
+  end
 
   defp execute(m, graph, observe, steps, notify) do
     {:ok, ctx} = call(notify, "init/0", fn -> m.init() end)
@@ -112,8 +178,15 @@ defmodule Outlaw.Conformance.Runner do
         do: {{:fail, :init_mismatch, %{}}, ctx},
         else: walk(m, graph, observe, steps, 1, ctx, p0, candidates, notify)
 
-    if function_exported?(m, :teardown, 1),
-      do: call(notify, "teardown/1", fn -> m.teardown(ctx) end)
+    if function_exported?(m, :teardown, 1) do
+      # Deliberately not `call/3`: teardown runs after the pass/fail verdict
+      # is already decided, so it must never become the reported `details.during`
+      # for a spec-level failure. `:teardown_started` still resets `await`'s
+      # per-receive timeout window (in case teardown itself hangs) without
+      # being treated as a `during` label.
+      notify.(:teardown_started)
+      m.teardown(ctx)
+    end
 
     result
   rescue
