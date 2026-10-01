@@ -89,7 +89,13 @@ defmodule Outlaw.Viewer do
 
   @spec html(model()) :: String.t()
   def html(model) do
-    data = model |> JSON.encode!() |> String.replace("</", "<\\/")
+    # `<` only ever appears inside JSON string values, so escaping every
+    # occurrence as the standard JSON < escape is always valid JSON and
+    # closes off every way a `<` could break out of the surrounding
+    # <script>...</script> element: not just `</script>` (which `<\/` alone
+    # handles) but also `<!--` (an HTML comment start, which some browsers'
+    # HTML parsers honor even inside a <script type="application/json"> block).
+    data = model |> JSON.encode!() |> String.replace("<", "\\u003c")
 
     EEx.eval_file(asset("viewer.html.eex"),
       assigns: [

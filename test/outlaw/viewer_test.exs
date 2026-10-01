@@ -25,7 +25,7 @@ defmodule Outlaw.ViewerTest do
   test "html is self-contained and embeds the data safely" do
     model = %{
       title: "A <b> & </script>",
-      note: nil,
+      note: "<!-- comment --> and </script>",
       nodes: [%{id: "1", vars: %{"s" => ~S("</script>")}, initial: true}],
       edges: [],
       highlight: []
@@ -40,8 +40,18 @@ defmodule Outlaw.ViewerTest do
     [_, json] =
       Regex.run(~r{<script type="application/json" id="outlaw-data">(.*?)</script>}s, html)
 
-    assert %{"nodes" => [%{"vars" => %{"s" => ~S("</script>")}}]} =
-             JSON.decode!(String.replace(json, "<\\/", "</"))
+    # Every `<` in the embedded JSON is escaped as < (valid JSON, since
+    # `<` only occurs inside strings), so the block contains neither `</script`
+    # nor `<!--`, and JSON.decode!/1 (which understands < natively)
+    # recovers the original values without any manual unescaping.
+    refute json =~ "</script"
+    refute json =~ "<!--"
+    assert json =~ "\\u003c"
+
+    assert %{
+             "note" => "<!-- comment --> and </script>",
+             "nodes" => [%{"vars" => %{"s" => ~S("</script>")}}]
+           } = JSON.decode!(json)
   end
 
   test "from_trace builds a linear path with loop and stutter edges" do
