@@ -89,7 +89,9 @@ Unparseable input returns `{:error, {:unparseable_value, raw}}` and surfaces as 
 Outlaw bug report containing the raw text.
 
 For comparison, the mapping module's `project/1` returns Elixir terms in this
-same representation. Helpers `Outlaw.Value.set/1`, `seq/1`, `model/1` build them.
+same representation. Helpers `Outlaw.Value.set/1` and `model/1` build them. Note
+TLC prints any function with domain `1..n` as a sequence, so such values are
+lists. Verified against TLC 2.19 (tla2tools v1.7.4, the pinned version).
 
 ### 3.2 Project layout (user's project)
 
@@ -227,8 +229,17 @@ satisfies them (TLC verified), so matching the graph implies them.
 
 All tasks accept `--json`, exit non-zero on failure, and take optional spec names
 (default: all specs in `specs_dir`). `outlaw.test` and `outlaw.verify` run in
-`MIX_ENV=test` (declared via `preferred_envs`) and execute the conformance tests
-through ExUnit, so mapping modules under `test/outlaw/` are compiled.
+`MIX_ENV=test` (declared via `preferred_envs` in the user's `mix.exs`), compile
+the project (mapping modules under `test/outlaw/` are on `elixirc_paths(:test)`),
+start the app, require `test/outlaw/outlaw_helper.exs` if present (for setup such
+as Ecto sandbox mode), discover mapping modules, and run the checks directly. The
+generated `*_conformance_test.exs` wraps the same check
+(`Outlaw.Conformance.assert_conforms/1`) so plain `mix test` covers conformance too.
+A mapping declared with `use Outlaw.Conformance, ..., discover: false` is
+skipped by discovery (useful for alternate or deliberately buggy mappings).
+
+With `--json`, the JSON report is the **last line of stdout** (compiler output may
+precede it) and is also written to `_build/outlaw/report.json`.
 
 | Task | Behavior |
 |---|---|
@@ -244,7 +255,8 @@ through ExUnit, so mapping modules under `test/outlaw/` are compiled.
 
 A single self-contained HTML file (Cytoscape.js vendored in `priv/`, works
 offline): pan/zoom, click a state to see its variables, filter by action,
-collapse by variable, and highlight a path (TLC counterexample or conformance
+collapse by variable (untick variables to merge states that agree on the rest),
+and highlight a path (TLC counterexample or conformance
 failure trace). Above 500 states it starts collapsed around the initial state and
 the highlighted path; users expand outward.
 
