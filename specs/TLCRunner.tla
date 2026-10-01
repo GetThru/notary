@@ -1,10 +1,11 @@
 ----------------------------- MODULE TLCRunner -----------------------------
 \* Outlaw.Tools.TLCRunner: runs one TLC model check as an OS process.
 \*
-\* The runner loop lives in the *calling* Elixir process: it reads TLC's
-\* output, enforces the state limit and the timeout, and returns a result.
-\* If the caller dies mid-run, a watchdog must kill the Java process, or it is
-\* orphaned (the bug deferred from Phase 1 as ruling R10).
+\* Each run has its own runner process (not linked to the caller) that owns
+\* the TLC port: it reads TLC's output, enforces the state limit and the
+\* timeout, and sends the result to the caller. It also watches the caller:
+\* if the caller dies mid-run, it kills the Java process (Reap), so TLC is
+\* never orphaned (the bug deferred from Phase 1 as ruling R10).
 \*
 \* External effects (modeled as actions, driven by stubs in the mapping):
 \*   Progress   - TLC reports one more distinct state
@@ -18,9 +19,9 @@ EXTENDS Naturals
 CONSTANT Limit          \* max distinct states before the runner kills TLC
 
 VARIABLES os,           \* the Java OS process
-          caller,       \* the Elixir process that called run/2
+          caller,       \* the Elixir process that started the run
           seen,         \* distinct states TLC has reported so far
-          result        \* what run/2 returned to the caller
+          result        \* the result delivered to the caller
 
 vars == <<os, caller, seen, result>>
 
@@ -46,7 +47,8 @@ Progress == /\ os = "alive"
             /\ seen' = seen + 1
             /\ UNCHANGED <<os, caller, result>>
 
-\* The runner sees the count pass the limit and kills TLC. Runs in the caller.
+\* The runner process sees the count pass the limit and kills TLC. Modeled
+\* only while the caller is alive; once it dies, Reap is what stops TLC.
 LimitKill == /\ os = "alive"
              /\ caller = "alive"
              /\ seen > Limit
@@ -62,7 +64,8 @@ Exit == /\ os = "alive"
         /\ result' = IF caller = "alive" THEN "ok" ELSE result
         /\ UNCHANGED <<caller, seen>>
 
-\* The deadline passes (external); the runner kills TLC. Runs in the caller.
+\* The deadline passes (external); the runner process kills TLC and reports
+\* the timeout. Modeled only while the caller is alive (see LimitKill).
 Timeout == /\ os = "alive"
            /\ caller = "alive"
            /\ os' = "killed"
@@ -82,7 +85,7 @@ CallerDies == /\ caller = "alive"
               /\ caller' = "dead"
               /\ UNCHANGED <<os, seen, result>>
 
-\* The watchdog notices the dead caller and kills TLC.
+\* The runner process notices the dead caller (watchdog) and kills TLC.
 Reap == /\ caller = "dead"
         /\ os = "alive"
         /\ os' = "killed"
