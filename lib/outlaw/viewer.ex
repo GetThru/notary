@@ -128,8 +128,15 @@ defmodule Outlaw.Viewer do
 
   # Decodes a trusted-but-possibly-corrupt local file: `:safe` refuses to create new
   # atoms, and a truncated/garbled binary raises ArgumentError instead of crashing
-  # the caller.
+  # the caller. The file is written by a *different* `mix` process (e.g. `mix
+  # outlaw.test`) than the one that later reads it (e.g. `mix outlaw.graph`), so
+  # the atoms embedded in the term (failure kinds, detail keys like `:during`)
+  # are not guaranteed to already exist in this fresh VM's atom table unless the
+  # modules that mention them as literals have been loaded here too.
   defp safe_decode(binary) do
+    Code.ensure_loaded(Failure)
+    Code.ensure_loaded(Step)
+    Code.ensure_loaded(Outlaw.Conformance.Runner)
     {:ok, :erlang.binary_to_term(binary, [:safe])}
   rescue
     ArgumentError -> :error
