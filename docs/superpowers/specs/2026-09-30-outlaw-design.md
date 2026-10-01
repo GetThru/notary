@@ -202,15 +202,31 @@ them. Internal actions must exist in the graph and must not appear in
 instead it treats the implementation as free to take any number of internal
 steps at any time (§5, `closure`).
 
-Internal actions are treated as **weakly fair** (matching `WF_vars(...)` in the
-spec): an enabled reaction must eventually happen. At the end of every run that
-declares internal actions, the runner *settles*: it re-projects every 10 ms for up
-to `settle_timeout` (config, default 1_000 ms) until the implementation is in a
-candidate state where no internal action is enabled (internal self-loops don't
-count). A projection outside `closure(C)` fails `:illegal_transition`; timing out
-fails `:internal_action_stalled` with the still-enabled internal actions in the
-details. This is a bounded, runtime form of liveness for reactions only — full
-liveness remains TLC's job on the spec.
+Fairness comes from the spec, not a blanket assumption that every declared
+internal action is fair. `Outlaw.Spec.fair_actions/1` scans the spec's `.tla`
+text (TLA comments -- `\*` to end of line, `(* ... *)` blocks -- stripped
+first) for `WF_<sub>(Name...)` / `SF_<sub>(Name...)` occurrences and returns
+the set of `Name`s: `WF_vars(Reap)`, `WF_<<x, y>>(Reap)`, `WF_vars(Pay(u))` and
+`\A u \in U : WF_vars(Pay(u))` all count (only the identifier immediately
+inside the outer parentheses is taken). A name that isn't actually a graph
+action (e.g. `WF_vars(Next)` -- `Next` is the whole-step formula, not an edge
+label) is harmless: `Outlaw.Conformance.check/3` only keeps its intersection
+with the mapping's declared `internal:` actions. Only that intersection --
+the *fair* internal actions -- must eventually fire; a declared internal
+action the spec doesn't mark fair (e.g. `LimitKill` in `specs/TLCRunner.tla`,
+which has `WF_vars(Reap)` but nothing naming `LimitKill`) is never required to
+happen.
+
+At the end of every run that declares internal actions, the runner *settles*:
+it re-projects every 10 ms for up to `settle_timeout` (config, default
+1_000 ms) until the implementation reaches a candidate state where no fair
+internal action is enabled (self-loops ignored) -- `closure` itself still
+considers every declared internal action, fair or not, regardless of
+fairness. A projection outside `closure(C)` fails `:illegal_transition` (this
+is checked even when no internal action is fair); timing out fails
+`:internal_action_stalled` with the still-enabled *fair* internal actions in
+the details. This is a bounded, runtime form of liveness for reactions only --
+full liveness remains TLC's job on the spec.
 
 Asynchrony can make a run non-repeatable, so shrinking may stop at a longer
 trace. Mappings should make external actions synchronous where they can (e.g.

@@ -20,10 +20,15 @@ defmodule Outlaw.Conformance do
       The runner never generates these as steps; instead it treats the
       implementation as free to take any number of them at any time, and
       *settles* at the end of each run — waiting (up to `Outlaw.Config`'s
-      `settle_timeout`, default 1 s) until none of them are enabled. Each name
-      must be an action in the spec's state graph and must not also appear as
-      a key of `actions/0` (validated, `:invalid_mapping`). See the Outlaw
-      design spec §4.3/§5.
+      `settle_timeout`, default 1 s) until the implementation reaches a
+      candidate state where no fair internal action is enabled (self-loops
+      ignored). Fairness comes from the spec itself, not every declared
+      internal action: only the ones named in a `WF_<sub>(Name)` or
+      `SF_<sub>(Name)` occurrence in the spec's text (`Outlaw.Spec.fair_actions/1`)
+      must eventually happen; a declared internal action the spec never marks
+      fair is never required to fire. Each name must be an action in the
+      spec's state graph and must not also appear as a key of `actions/0`
+      (validated, `:invalid_mapping`). See the Outlaw design spec §4.3/§5.
 
   `project/1` must return values in the `Outlaw.Value` representation; `model/1`
   and `set/1` are imported. Prefer unnamed processes (or stop them in
@@ -113,8 +118,26 @@ defmodule Outlaw.Conformance do
           | {:error, Error.t()}
   def check(module, %StateGraph{} = graph, opts \\ []) do
     with :ok <- validate(module, graph) do
-      Outlaw.Conformance.Runner.check(module, graph, observed_vars(module, graph), opts)
+      fair = Spec.fair_actions(spec(module))
+
+      Outlaw.Conformance.Runner.check(
+        module,
+        graph,
+        observed_vars(module, graph),
+        Keyword.put(opts, :fair, fair)
+      )
     end
+  end
+
+  @doc "Internal actions the mapping declares (sorted)."
+  @spec internal_actions(module()) :: [String.t()]
+  def internal_actions(module), do: module.__outlaw__() |> Map.get(:internal, []) |> Enum.sort()
+
+  @doc "The declared internal actions that the spec's text also marks fair (sorted)."
+  @spec fair_internal_actions(module()) :: [String.t()]
+  def fair_internal_actions(module) do
+    fair = Spec.fair_actions(spec(module))
+    Enum.filter(internal_actions(module), &MapSet.member?(fair, &1))
   end
 
   @doc """

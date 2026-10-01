@@ -7,5 +7,5 @@ Request == /\ status \in {"idle", "done"}
 Complete == /\ status = "pending"
             /\ status' = "done"
 Next == Request \/ Complete
-Spec == Init /\ [][Next]_status
+Spec == Init /\ [][Next]_status /\ WF_status(Complete)
 ====

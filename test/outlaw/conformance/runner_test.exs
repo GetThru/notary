@@ -47,6 +47,155 @@ defmodule Outlaw.Conformance.RunnerTest do
     test "Config.get(:settle_timeout) defaults to 1_000" do
       assert Config.get(:settle_timeout) == 1_000
     end
+
+    test "a declared internal action the spec does not mark fair is not required at settle" do
+      # Bypasses Conformance.check (which computes :fair from the real spec
+      # file) to call the runner directly with an empty fair set: even though
+      # AsyncStalledSpec's "Complete" never fires, settle must not wait for it
+      # or report it pending, since nothing says it's fair here.
+      assert {:ok, %{runs: 5, seed: 42}} =
+               Runner.check(Fixtures.AsyncStalledSpec, Fixtures.graph("Async"), ["status"],
+                 seed: 42,
+                 max_runs: 5,
+                 fair: MapSet.new()
+               )
+    end
+  end
+
+  describe "settle edge cases (unit-level, synthetic graphs)" do
+    defmodule FlipMapping do
+      @moduledoc false
+      use Outlaw.Conformance, spec: "unused.tla", internal: ["Flip"], discover: false
+
+      @impl true
+      def init, do: Agent.start_link(fn -> 0 end)
+
+      @impl true
+      def actions, do: %{"Noop" => StreamData.constant(%{})}
+
+      @impl true
+      def action("Noop", _params, ctx), do: {:ok, ctx}
+
+      # Returns "a" (matching the only graph state) the first time (the
+      # init-time projection), and an out-of-closure value on every call
+      # after that (the first settle re-projection), so settle fails
+      # deterministically on its very first iteration.
+      @impl true
+      def project(ctx) do
+        n = Agent.get_and_update(ctx, &{&1, &1 + 1})
+        %{"v" => if(n == 0, do: "a", else: "zzz")}
+      end
+    end
+
+    defmodule SelfLoopMapping do
+      @moduledoc false
+      use Outlaw.Conformance, spec: "unused.tla", internal: ["Flip"], discover: false
+
+      @impl true
+      def init, do: {:ok, :ctx}
+
+      @impl true
+      def actions, do: %{"Noop" => StreamData.constant(%{})}
+
+      @impl true
+      def action("Noop", _params, ctx), do: {:ok, ctx}
+
+      @impl true
+      def project(_ctx), do: %{"v" => "a"}
+    end
+
+    defp self_loop_graph do
+      %Outlaw.StateGraph{
+        states: %{"0" => %{"v" => "a"}},
+        edges: %{{"0", "Flip"} => ["0"]},
+        initial: ["0"],
+        actions: MapSet.new(["Flip", "Noop"]),
+        variables: ["v"]
+      }
+    end
+
+    test "settle finds a projection outside the closure: :illegal_transition, (settle) last" do
+      assert {:error, %Failure{kind: :illegal_transition, steps: steps}} =
+               Runner.run(
+                 FlipMapping,
+                 self_loop_graph(),
+                 ["v"],
+                 ["Flip"],
+                 MapSet.new(["Flip"]),
+                 [],
+                 :infinity,
+                 1_000
+               )
+
+      last = List.last(steps)
+      assert last.action == "(settle)"
+      assert last.params == nil
+    end
+
+    defmodule TwoInternalMapping do
+      @moduledoc false
+      use Outlaw.Conformance,
+        spec: "unused.tla",
+        internal: ["FairFlip", "UnfairFlip"],
+        discover: false
+
+      @impl true
+      def init, do: {:ok, :ctx}
+
+      @impl true
+      def actions, do: %{"Noop" => StreamData.constant(%{})}
+
+      @impl true
+      def action("Noop", _params, ctx), do: {:ok, ctx}
+
+      # Never actually fires either reaction: both stay enabled forever.
+      @impl true
+      def project(_ctx), do: %{"v" => "a"}
+    end
+
+    test "internal_action_stalled's pending list names only the fair internal action" do
+      graph = %Outlaw.StateGraph{
+        states: %{"0" => %{"v" => "a"}, "1" => %{"v" => "b"}, "2" => %{"v" => "c"}},
+        edges: %{{"0", "FairFlip"} => ["1"], {"0", "UnfairFlip"} => ["2"]},
+        initial: ["0"],
+        actions: MapSet.new(["FairFlip", "UnfairFlip", "Noop"]),
+        variables: ["v"]
+      }
+
+      assert {:error, %Failure{kind: :internal_action_stalled, details: details}} =
+               Runner.run(
+                 TwoInternalMapping,
+                 graph,
+                 ["v"],
+                 ["FairFlip", "UnfairFlip"],
+                 MapSet.new(["FairFlip"]),
+                 [],
+                 :infinity,
+                 30
+               )
+
+      assert details.pending == ["FairFlip"]
+    end
+
+    test "an internal self-loop never blocks settle (ignored for quiescence)" do
+      {time, result} =
+        :timer.tc(fn ->
+          Runner.run(
+            SelfLoopMapping,
+            self_loop_graph(),
+            ["v"],
+            ["Flip"],
+            MapSet.new(["Flip"]),
+            [],
+            :infinity,
+            2_000
+          )
+        end)
+
+      assert {:ok, _steps} = result
+      # Well under settle_timeout: proves it didn't wait it out.
+      assert time < 500_000
+    end
   end
 
   describe "buggy implementations fail with a shrunk trace" do
