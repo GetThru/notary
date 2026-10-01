@@ -270,36 +270,38 @@ defmodule Outlaw.Conformance.WalkTest do
   end
 
   describe "Async: forced :settle after a fair internal action becomes enabled" do
-    # The forced-settle bias only fires on a *rising edge*: the step must
-    # newly make a fair internal action enabled somewhere in P (it wasn't
-    # enabled before that step) -- see the moduledoc and fix round 1, R2-2
-    # item 5. For this Async fixture, once P first reaches {pending, done}
-    # (after the very first Request), the fair action ("Complete") stays
-    # enabled somewhere in P for the rest of the run (every later Request is
-    # a P-fixed-point), so the rising edge -- and thus the forced-settle
-    # bias -- can only fire *once* per value, not on every Request
-    # occurrence. Aggregated over *all* Request occurrences in many values
-    # (most of which are far from that single rising edge), this gives a
-    # modest but real and reproducible lift over the baseline, not the
-    # >= 30%-of-occurrences figure that held under the earlier (incorrect)
-    # "currently enabled" interpretation -- measured via a 300-value,
-    # seed-42 sample, see task-1-report.md.
-    test ":settle follows Request more often when Complete is fair than when it isn't" do
+    # Fix round 2 (controller ruling R2-3, supersedes R2-2 item 5): the bias
+    # fires after an emitted action `a` when the *direct* (pre-closure)
+    # successors of P via `a` include a state where some fair internal
+    # action is enabled (self-loops excluded) -- not whether the
+    # (already-closed) possible set itself currently contains such a state.
+    # P is always closed under internal actions, so a pending reaction stays
+    # visible in P forever once first exposed; checking P itself (fix round
+    # 1's rising-edge attempt) could therefore only ever fire once per value.
+    # For Async, every "Request" lands (before closure) on "pending", where
+    # "Complete" is enabled, so this fires after *every* Request, restoring
+    # the strong, brief-literal signal.
+    test ":settle follows Request in >= 30% of occurrences when Complete is fair" do
       graph = Fixtures.graph("Async")
       actions = AsyncSpec.actions()
+      gen = Walk.generator(graph, actions, internal: ["Complete"], fair: MapSet.new(["Complete"]))
 
-      gen_fair =
-        Walk.generator(graph, actions, internal: ["Complete"], fair: MapSet.new(["Complete"]))
+      # Measured (seed 42, 300 values): ~52.0%.
+      rate = gen |> values(300) |> settle_after_request_rate()
 
-      gen_no_fair = Walk.generator(graph, actions, internal: ["Complete"], fair: MapSet.new())
+      assert rate >= 0.30
+    end
 
-      fair_rate = gen_fair |> values(300) |> settle_after_request_rate()
-      no_fair_rate = gen_no_fair |> values(300) |> settle_after_request_rate()
+    test "no forced settles when nothing is declared fair (only the ~5% base rate)" do
+      graph = Fixtures.graph("Async")
+      actions = AsyncSpec.actions()
+      gen = Walk.generator(graph, actions, internal: ["Complete"], fair: MapSet.new())
 
-      assert fair_rate > no_fair_rate
-      assert fair_rate >= 0.06
-      assert fair_rate <= 0.15
-      assert no_fair_rate <= 0.10
+      # Measured (seed 42, 300 values): ~5.6%, matching the base 5% :settle
+      # weight -- with no fair actions declared, the bias never fires.
+      rate = gen |> values(300) |> settle_after_request_rate()
+
+      assert rate < 0.15
     end
   end
 

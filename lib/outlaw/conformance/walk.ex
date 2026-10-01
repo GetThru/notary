@@ -30,16 +30,32 @@ defmodule Outlaw.Conformance.Walk do
 
   ## Forced settle (fair internal actions)
 
-  In the continuation phase, after a step the walk checks whether it just
-  made a fair internal action (`opts[:fair]`) go from *not* enabled anywhere
-  in the possible set `P` to enabled somewhere in `P` — a rising edge, not
-  merely "currently enabled" (an already-enabled fair action does not keep
-  re-triggering the bias on every subsequent step). Only then does the next
-  token's settle-bias roll get a chance to force `:settle` (probability 1/2);
-  otherwise it's ignored and the token resolves normally. "Enabled" here
-  ignores self-loops (a successor equal to the source state), matching
-  `Outlaw.Conformance.Runner`'s settling check — a self-loop can never be
-  observed, so it can never force (or block) a settle.
+  After emitting an action `a`, the walk checks the *direct* successors of
+  the possible set `P` via `a` — `successors(P, a)`, *before* taking closure
+  under internal actions — for a state where some fair internal action
+  (`opts[:fair]`) is enabled (self-loops excluded). Only then does the
+  *next* token's settle-bias roll get a chance to force `:settle`
+  (probability 1/2); otherwise it's ignored and the token resolves normally.
+
+  This checks the pre-closure landing states deliberately, not whether `P`
+  itself (already closure-including) currently contains such a state: `P` is
+  always closed under internal actions, so once a pending reaction is first
+  exposed it stays visible in `P` forever (closure never removes anything).
+  Checking against `P` itself would therefore fire the bias at most once per
+  generated value no matter how many times the triggering action recurs
+  (e.g. in a spec with `pending --Request--> pending` self-looping into a
+  state that always keeps a reaction enabled, every `Request` after the
+  first would look like "no change" against `P`). Checking the raw landing
+  states of the just-emitted action instead fires every time that action
+  lands somewhere exposing the reaction, including repeat visits to the same
+  enabling state — e.g. for the Async fixture (`internal: ["Complete"]`,
+  `fair: MapSet.new(["Complete"])`), every `Request` lands (before closure)
+  on the `pending` state, where `Complete` is enabled, so the bias is
+  eligible after *every* `Request`, not just the first.
+
+  "Enabled" ignores self-loops (a successor equal to the source state),
+  matching `Outlaw.Conformance.Runner`'s settling check — a self-loop can
+  never be observed, so it can never trigger (or block) a settle.
   """
 
   alias Outlaw.{Config, StateGraph}
@@ -250,10 +266,8 @@ defmodule Outlaw.Conformance.Walk do
 
         {name, token}, {possible, _force?} ->
           params = Map.fetch!(token.params, name)
-          was_enabled? = any_fair_enabled?(graph, possible, fair)
           new_possible = advance(graph, possible, name, internal)
-          now_enabled? = any_fair_enabled?(graph, new_possible, fair)
-          {{name, params}, {new_possible, now_enabled? and not was_enabled?}}
+          {{name, params}, {new_possible, triggers_fair?(graph, possible, name, fair)}}
       end)
 
     {continuation_rev, _possible, _force?} =
@@ -297,16 +311,32 @@ defmodule Outlaw.Conformance.Walk do
 
   defp resolve_token(graph, external_actions, internal, fair, possible, force?, token) do
     item = pick_item(graph, external_actions, possible, force?, token)
-    was_enabled? = any_fair_enabled?(graph, possible, fair)
     new_possible = apply_item(graph, internal, possible, item)
-    now_enabled? = any_fair_enabled?(graph, new_possible, fair)
-    {item, new_possible, now_enabled? and not was_enabled?}
+    {item, new_possible, next_force?(graph, possible, fair, item)}
   end
 
   defp apply_item(_graph, _internal, possible, :settle), do: possible
 
   defp apply_item(graph, internal, possible, {name, _params}),
     do: advance(graph, possible, name, internal)
+
+  defp next_force?(_graph, _possible, _fair, :settle), do: false
+
+  defp next_force?(graph, possible, fair, {name, _params}),
+    do: triggers_fair?(graph, possible, name, fair)
+
+  # Whether emitting `name` from `possible` lands (via `successors/3`
+  # directly, *before* taking closure under internal actions) on a state
+  # where some fair internal action is enabled (self-loops excluded). See
+  # the moduledoc's "Forced settle" section for why this must be checked
+  # against the raw landing states rather than the (always closure-including)
+  # possible set itself.
+  defp triggers_fair?(graph, possible, name, fair) do
+    possible
+    |> Enum.flat_map(&StateGraph.successors(graph, &1, name))
+    |> Enum.uniq()
+    |> then(&any_fair_enabled?(graph, &1, fair))
+  end
 
   defp pick_item(graph, external_actions, possible, force?, token) do
     if force? and token.settle_bias do
