@@ -49,11 +49,38 @@ defmodule Outlaw.Report do
       case payload do
         {:violation, v} -> format_violation(name, v)
         {:error, %Failure{} = f} -> format_failure(name, f)
-        {:error, %Error{} = e} -> e.message
+        {:error, %Error{} = e} -> format_error(e)
       end
 
     "  #{stage}: #{status}\n" <> indent(body, 4)
   end
+
+  # Outlaw.Error.details can carry context that doesn't make it into `message`
+  # (e.g. the last output lines on a TLC timeout, or the raw text behind an
+  # unparseable value): spec §9 wants those in the human-readable report too,
+  # not just in `--json`/`to_json/1`'s `details`.
+  defp format_error(%Error{message: message, details: details}) do
+    extras =
+      [
+        detail_block("Last output", details[:output_tail]),
+        unless_in_message(message, "Output", details[:output]),
+        detail_block("Raw text", details[:raw])
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    Enum.join([message | extras], "\n\n")
+  end
+
+  defp unless_in_message(message, label, text) when is_binary(text) do
+    unless String.contains?(message, text), do: detail_block(label, text)
+  end
+
+  defp unless_in_message(_message, _label, _text), do: nil
+
+  defp detail_block(label, text) when is_binary(text) and text != "",
+    do: "#{label}:\n" <> indent(text, 2)
+
+  defp detail_block(_label, _text), do: nil
 
   @spec format_failure(String.t(), Failure.t()) :: String.t()
   def format_failure(spec_name, %Failure{} = f) do

@@ -37,6 +37,46 @@ defmodule Outlaw.ReportTest do
       specs: [%{spec: "Bank", status: status, stages: stages}]
     }
 
+  test "format appends an Error's output_tail/raw details not already in the message" do
+    timeout_error =
+      Error.new(:tlc_timeout, "TLC did not finish within 1000ms and was stopped.", %{
+        output_tail: "Progress(4): ...\nComputing initial states..."
+      })
+
+    text =
+      report([%{stage: :check, status: :error, payload: {:error, timeout_error}}])
+      |> Report.format()
+
+    assert text =~ "TLC did not finish within 1000ms"
+    assert text =~ "Progress(4): ..."
+    assert text =~ "Computing initial states..."
+
+    raw_error =
+      Error.new(
+        :unparseable_state,
+        "Outlaw could not parse a TLC state. This is an Outlaw bug; please report it with the raw text.",
+        %{raw: "weird \\* garbage"}
+      )
+
+    text2 =
+      report([%{stage: :check, status: :error, payload: {:error, raw_error}}]) |> Report.format()
+
+    assert text2 =~ "please report it with the raw text"
+    assert text2 =~ "weird \\* garbage"
+  end
+
+  test "format does not duplicate an Error's :output detail already present in the message" do
+    spec_error =
+      Error.new(:spec_error, "TLA+ spec error in Counter.tla:3:1:\nboom, this exact text", %{
+        output: "boom, this exact text"
+      })
+
+    text =
+      report([%{stage: :check, status: :error, payload: {:error, spec_error}}]) |> Report.format()
+
+    assert length(:binary.matches(text, "boom, this exact text")) == 1
+  end
+
   test "format and to_json do not raise for mistyped projection values (nil/atom/tuple)" do
     failure = %Failure{
       kind: :invalid_projection,
