@@ -102,6 +102,8 @@ defmodule Outlaw.Specs.TLCRunner do
   alias Outlaw.Specs.TLCRunner.FakeTLC
   alias Outlaw.Tools.TLCRunner
 
+  # Must match `CONSTANT Limit = 2` in specs/TLCRunner.cfg: TLC checks the
+  # spec's `Limit` against this same value, so the two must stay in sync.
   @limit 2
   @wait 2_000
   # How long project/1 waits for the result to catch up with the OS process,

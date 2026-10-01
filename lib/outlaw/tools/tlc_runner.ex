@@ -22,10 +22,15 @@ defmodule Outlaw.Tools.TLCRunner do
   @type result :: %{exit_status: non_neg_integer(), output: String.t()}
 
   defmodule Run do
-    @moduledoc "A started TLC run: the runner process, the run's ref and its owner."
-    @enforce_keys [:pid, :ref, :owner]
-    defstruct [:pid, :ref, :owner]
-    @type t :: %__MODULE__{pid: pid(), ref: reference(), owner: pid()}
+    @moduledoc """
+    A started TLC run: the runner process, its owner, the message tag (`ref`,
+    used for the result/cancel/deadline messages) and the owner's monitor of
+    the runner process (`monitor`, used to detect the runner dying without a
+    result).
+    """
+    @enforce_keys [:pid, :ref, :monitor, :owner]
+    defstruct [:pid, :ref, :monitor, :owner]
+    @type t :: %__MODULE__{pid: pid(), ref: reference(), monitor: reference(), owner: pid()}
   end
 
   @doc """
@@ -68,18 +73,14 @@ defmodule Outlaw.Tools.TLCRunner do
     }
 
     owner = self()
+    # Created before spawning and captured by the closure, not learned from a
+    # first message: a handshake message has a window (between spawn and
+    # send) where a dead owner would leave the runner blocked forever in a
+    # `receive` with no `after`. There is no such window here.
+    ref = make_ref()
 
-    # The monitor ref doubles as the run's ref (reply/deadline/cancel tag); the
-    # runner learns it from its first message.
-    {pid, ref} =
-      spawn_monitor(fn ->
-        receive do
-          {:ref, ref} -> init_runner(owner, ref, config)
-        end
-      end)
-
-    send(pid, {:ref, ref})
-    {:ok, %Run{pid: pid, ref: ref, owner: owner}}
+    {pid, monitor} = spawn_monitor(fn -> init_runner(owner, ref, config) end)
+    {:ok, %Run{pid: pid, ref: ref, monitor: monitor, owner: owner}}
   end
 
   @doc """
@@ -93,20 +94,28 @@ defmodule Outlaw.Tools.TLCRunner do
     * `:tlc_cancelled` — `cancel/1` stopped the run; TLC was killed.
     * `:await_timeout` — `timeout` ms passed with no result yet. The run keeps
       going and the result is still delivered, so `await/2` may be called
-      again.
+      again to pick it up. If it never is, the eventual result message (and
+      the runner process's own `:DOWN`, since it exits normally once it has
+      replied) are simply left sitting in the owner's mailbox.
+
+  Calling `await/2` again *after* it has already returned a final result (any
+  return value other than `:await_timeout`) blocks until `timeout` (or
+  forever, with the default `:infinity`): that first call already consumed
+  the result message and demonitored the runner, so nothing more will ever
+  arrive.
   """
   @spec await(Run.t(), timeout()) :: {:ok, result()} | {:error, Error.t()}
-  def await(%Run{pid: pid, ref: ref, owner: owner}, timeout \\ :infinity) do
+  def await(%Run{pid: pid, ref: ref, monitor: monitor, owner: owner}, timeout \\ :infinity) do
     if owner != self() do
       raise ArgumentError, "only the owner (#{inspect(owner)}) may await a TLC run"
     end
 
     receive do
       {^ref, :result, result} ->
-        Process.demonitor(ref, [:flush])
+        Process.demonitor(monitor, [:flush])
         result
 
-      {:DOWN, ^ref, :process, ^pid, reason} ->
+      {:DOWN, ^monitor, :process, ^pid, reason} ->
         {:error,
          Error.new(:tlc_crashed, "The TLC runner process exited without a result.", %{
            reason: inspect(reason)
