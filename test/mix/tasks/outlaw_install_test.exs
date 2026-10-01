@@ -3,6 +3,9 @@ defmodule Mix.Tasks.OutlawInstallTest do
 
   import ExUnit.CaptureIO
 
+  # Needs the real, checksum-matching jar installed (no download happens), so
+  # it is excluded with the other :tlc tests until `mix outlaw.install` ran.
+  @moduletag :tlc
   @moduletag :tmp_dir
 
   setup %{tmp_dir: dir} do
