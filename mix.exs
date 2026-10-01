@@ -11,6 +11,7 @@ defmodule Outlaw.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
+      test_ignore_filters: [~r{^test/fixtures/}],
       description:
         "TLA+ specifications as the contract between humans and LLMs for Elixir projects."
     ]
