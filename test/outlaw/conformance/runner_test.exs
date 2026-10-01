@@ -128,6 +128,84 @@ defmodule Outlaw.Conformance.RunnerTest do
     end
   end
 
+  describe "post-shrink minimization (Runner.minimize/4)" do
+    # A fake replay: fails iff `pred` holds for the item list.
+    defp fake_replay(pred) do
+      fn items ->
+        if pred.(items),
+          do: {:error, Failure.new(:illegal_transition, [], %{items: items})},
+          else: {:ok, []}
+      end
+    end
+
+    test "a long failing list minimizes to exactly the one item that matters" do
+      x = {"X", %{}}
+      noise = for i <- 1..29, do: if(rem(i, 5) == 0, do: :settle, else: {"N", %{i: i}})
+      items = Enum.take(noise, 17) ++ [x] ++ Enum.drop(noise, 17)
+      replay = fake_replay(&(x in &1))
+      {:error, failure} = replay.(items)
+
+      assert {[^x], %Failure{details: %{items: [^x]}}, stats} =
+               Runner.minimize(items, failure, replay, seed: 1)
+
+      assert stats.removed == 29
+      assert stats.replays <= 200
+    end
+
+    test "params are reduced to a smaller value from the action's own generator" do
+      replay = fake_replay(&Enum.any?(&1, fn item -> match?({"W", %{a: _}}, item) end))
+      items = [{"N", %{}}, {"W", %{a: 4}}]
+      {:error, failure} = replay.(items)
+
+      assert {[{"W", %{a: 1}}], _failure, stats} =
+               Runner.minimize(items, failure, replay,
+                 seed: 7,
+                 actions: %{
+                   "N" => StreamData.constant(%{}),
+                   "W" => StreamData.fixed_map(%{a: StreamData.integer(1..5)})
+                 }
+               )
+
+      assert stats.params == 1
+    end
+
+    test "total replays are capped by :max_replays" do
+      replay = fake_replay(&({"X", %{}} in &1))
+      items = List.duplicate({"N", %{}}, 40) ++ [{"X", %{}}]
+      {:error, failure} = replay.(items)
+
+      assert {min_items, %Failure{}, %{replays: 5}} =
+               Runner.minimize(items, failure, replay, seed: 1, max_replays: 5)
+
+      assert {"X", %{}} in min_items
+    end
+
+    test "against the real runner: Inc past Max minimizes to exactly Max+1 Incs" do
+      inc = {"Inc", %{}}
+      items = [inc, :settle, inc, :settle, inc, inc, inc, inc, :settle, inc]
+
+      replay = fn items ->
+        Runner.run(
+          Fixtures.CounterNoGuardSpec,
+          Fixtures.graph("Counter"),
+          ["x"],
+          [],
+          MapSet.new(),
+          items,
+          5_000,
+          1_000
+        )
+      end
+
+      {:error, failure} = replay.(items)
+
+      assert {[^inc, ^inc, ^inc, ^inc], %Failure{kind: :action_not_enabled, steps: steps}, _} =
+               Runner.minimize(items, failure, replay, seed: 42)
+
+      assert Enum.map(steps, & &1.action) == [nil, "Inc", "Inc", "Inc", "Inc"]
+    end
+  end
+
   describe "settle edge cases (unit-level, synthetic graphs)" do
     defmodule FlipMapping do
       @moduledoc false

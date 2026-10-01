@@ -293,7 +293,21 @@ generator: uniform picks from `actions/0`, no `:settle` points).
 - **Reproducibility and shrinking.** All randomness is StreamData's, so `--seed`
   reproduces the sequences; a value is a plain list of steps and `:settle`
   points and shrinks like any list (removing steps may turn later actions into
-  disabled ones, which still test guards).
+  disabled ones, which still test guards). Because each generated step is
+  chosen relative to the walk's possible set, StreamData deleting one step can
+  reinterpret every later one, so its shrinking can stop at a long trace.
+  After StreamData has shrunk a failure, the runner therefore minimizes the
+  concrete failing item list itself (`Outlaw.Conformance.Runner.minimize/4`,
+  both generation modes): repeated rounds of deletion (contiguous chunks --
+  halves, quarters, ... -- then single items, front to back) and params
+  reduction (for each step, values from that action's own `actions/0`
+  generator that are smaller in Erlang term order, smallest first), keeping
+  each change whose replay still fails -- with any failure kind, as in
+  StreamData's own shrinking -- until a round changes nothing, capped at 200
+  replays in total (each can cost up to `settle_timeout`). The reported
+  failure is the last failing replay's; its details record the pass
+  (`minimized: N replays, K items removed, P params reduced`); the seed is
+  unchanged.
 
 ### 5.2 Coverage
 

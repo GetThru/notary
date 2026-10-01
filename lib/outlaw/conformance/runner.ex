@@ -25,17 +25,181 @@ defmodule Outlaw.Conformance.Runner do
     options = [initial_seed: {0, 0, seed}, max_runs: max_runs, max_shrinking_steps: 500]
 
     result =
-      StreamData.check_all(generator, options, fn steps ->
-        case run(module, graph, observe, internal, fair, steps, timeout, settle_timeout) do
+      StreamData.check_all(generator, options, fn items ->
+        case run(module, graph, observe, internal, fair, items, timeout, settle_timeout) do
           {:ok, _steps} -> {:ok, nil}
-          {:error, failure} -> {:error, failure}
+          {:error, failure} -> {:error, {items, failure}}
         end
       end)
 
     case result do
-      {:ok, _} -> {:ok, %{runs: max_runs, seed: seed}}
-      {:error, %{shrunk_failure: failure}} -> {:error, %{failure | seed: seed}}
+      {:ok, _} ->
+        {:ok, %{runs: max_runs, seed: seed}}
+
+      {:error, %{shrunk_failure: {items, failure}}} ->
+        replay = &run(module, graph, observe, internal, fair, &1, timeout, settle_timeout)
+
+        {_items, failure, stats} =
+          minimize(items, failure, replay, seed: seed, actions: module.actions())
+
+        details = Map.put(failure.details, :minimized, format_stats(stats))
+        {:error, %{failure | seed: seed, details: details}}
     end
+  end
+
+  defp format_stats(%{replays: r, removed: d, params: p}),
+    do: "#{r} replays, #{d} items removed, #{p} params reduced"
+
+  # -- post-shrink minimization (Outlaw design spec §5.1) ----------------------
+
+  @default_max_replays 200
+
+  @doc """
+  Minimizes a failing item list after StreamData's own shrinking (design spec
+  §5.1, "Reproducibility and shrinking"). The spec-guided generator's values
+  don't keep their identity when StreamData deletes a token (later tokens get
+  reinterpreted against a different possible set), so its shrinking can stop
+  at a long trace; this pass works on the concrete `{name, params}` /
+  `:settle` items instead, where deleting one item leaves the others intact.
+
+  Repeats, until a round changes nothing or the replay budget runs out:
+    * deletion: tries removing contiguous chunks (halves, quarters, ... then
+      single items, front to back), keeping a removal whenever `replay`
+      still returns `{:error, _}`;
+    * params: for each `{name, params}` item, tries values from `name`'s
+      params generator in `opts[:actions]` that are smaller (Erlang term
+      order) than the current params, smallest first, keeping the first one
+      that still fails.
+
+  Any failure counts as "still fails" (as in StreamData's shrinking), so the
+  kind may change along the way (e.g. an `:illegal_transition` that needed a
+  preceding step can become an `:action_not_enabled` without it). Returns
+  the minimized items, the `Failure` from the last failing replay (or the
+  given one if nothing was removed or reduced) and
+  `%{replays:, removed:, params:}`.
+
+  Options: `:seed` (integer; drives params candidate draws, default 0),
+  `:actions` (params generators, default `%{}`: no params pass),
+  `:max_replays` (default #{@default_max_replays}; each replay can cost up
+  to `settle_timeout`, so this bounds the pass).
+  """
+  @spec minimize(
+          [{String.t(), map()} | :settle],
+          Failure.t(),
+          ([{String.t(), map()} | :settle] -> {:ok, term()} | {:error, Failure.t()}),
+          keyword()
+        ) ::
+          {[{String.t(), map()} | :settle], Failure.t(),
+           %{replays: non_neg_integer(), removed: non_neg_integer(), params: non_neg_integer()}}
+  def minimize(items, failure, replay, opts \\ []) do
+    m = %{
+      items: items,
+      failure: failure,
+      replay: replay,
+      seed: Keyword.get(opts, :seed, 0),
+      actions: Keyword.get(opts, :actions, %{}),
+      budget: Keyword.get(opts, :max_replays, @default_max_replays),
+      replays: 0,
+      removed: 0,
+      params: 0
+    }
+
+    m = minimize_rounds(m)
+    {m.items, m.failure, Map.take(m, [:replays, :removed, :params])}
+  end
+
+  defp minimize_rounds(m) do
+    m2 = m |> deletion_pass() |> params_pass()
+
+    if m2.items == m.items or m2.replays >= m2.budget,
+      do: m2,
+      else: minimize_rounds(m2)
+  end
+
+  # Replays `candidate`; on failure it becomes the current items/failure.
+  defp try_items(m, candidate) do
+    if m.replays >= m.budget do
+      {:exhausted, m}
+    else
+      m = %{m | replays: m.replays + 1}
+
+      case m.replay.(candidate) do
+        {:error, failure} -> {:fails, %{m | items: candidate, failure: failure}}
+        _ -> {:passes, m}
+      end
+    end
+  end
+
+  defp deletion_pass(m), do: delete_chunks(m, chunk_sizes(length(m.items)))
+
+  defp chunk_sizes(0), do: []
+  defp chunk_sizes(1), do: [1]
+  defp chunk_sizes(n), do: [div(n, 2) | chunk_sizes(div(n, 2))] |> Enum.uniq()
+
+  defp delete_chunks(m, []), do: m
+
+  defp delete_chunks(m, [size | sizes]) do
+    case delete_from(m, size, 0) do
+      {:exhausted, m} -> m
+      {:done, m} -> delete_chunks(m, sizes)
+    end
+  end
+
+  defp delete_from(m, size, i) do
+    if i >= length(m.items) do
+      {:done, m}
+    else
+      {chunk, rest} = m.items |> Enum.drop(i) |> Enum.split(size)
+      candidate = Enum.take(m.items, i) ++ rest
+
+      case try_items(m, candidate) do
+        {:exhausted, m} -> {:exhausted, m}
+        {:fails, m} -> delete_from(%{m | removed: m.removed + length(chunk)}, size, i)
+        {:passes, m} -> delete_from(m, size, i + size)
+      end
+    end
+  end
+
+  defp params_pass(m), do: reduce_params(m, 0)
+
+  defp reduce_params(m, i) do
+    if i >= length(m.items) or m.replays >= m.budget do
+      m
+    else
+      case Enum.at(m.items, i) do
+        {name, params} when is_map_key(m.actions, name) ->
+          m
+          |> try_params(i, name, smaller_params(m, i, name, params))
+          |> reduce_params(i + 1)
+
+        _ ->
+          reduce_params(m, i + 1)
+      end
+    end
+  end
+
+  defp try_params(m, _i, _name, []), do: m
+
+  defp try_params(m, i, name, [params | more]) do
+    case try_items(m, List.replace_at(m.items, i, {name, params})) do
+      {:fails, m} -> %{m | params: m.params + 1}
+      {:passes, m} -> try_params(m, i, name, more)
+      {:exhausted, m} -> m
+    end
+  end
+
+  # Deterministic (from :seed and the item's position) draws from the
+  # action's own params generator, so every candidate is a value the mapping
+  # can actually be given; only ones smaller than the current params count.
+  defp smaller_params(m, i, name, params) do
+    gen = Map.fetch!(m.actions, name)
+
+    for k <- 0..15 do
+      gen |> StreamData.seeded(m.seed * 1_000 + i * 16 + k) |> Enum.at(0)
+    end
+    |> Enum.uniq()
+    |> Enum.filter(&(&1 < params))
+    |> Enum.sort()
   end
 
   # Design spec §5 step 3 / §5.1: spec-guided by default; `generation:
