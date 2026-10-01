@@ -6,9 +6,16 @@ defmodule Outlaw.Conformance.Walk do
   `Outlaw.Conformance.Runner.steps_generator/2`).
 
   Pure: no processes, no global/persistent state. `shortest_path/5` runs a
-  single BFS with parent pointers (O(V+E)); `generator/3` runs it once per
-  build and reconstructs every needed path from the parent map in O(path
-  length) each — no repeated per-target BFS.
+  single BFS with parent pointers over the external-action edges, not one
+  per target; `generator/3` runs it once per build and reconstructs every
+  needed path from the parent map in O(path length) each — no repeated
+  per-target re-search. The BFS visits each state at most once and is O(V+E)
+  in the external-action edges, but it also computes `closure/3` once for
+  each newly-discovered state (to alias its closure-mates onto the same
+  parent pointer, see `discover/6`); since that's a fresh fixpoint computation
+  per discovery rather than a memoized lookup, the worst case across a run
+  with many internal-action edges is O(V·(V+E_internal)), not O(V+E) — fine
+  for the graph sizes Outlaw deals with, but not asymptotically tight.
 
   ## Generator shape (why it's built this way)
 
@@ -27,6 +34,24 @@ defmodule Outlaw.Conformance.Walk do
   shorter (only each item's own choice could shrink, regenerating its entire
   tail). `targeted?` shrinks to `false` (dropping the prefix entirely), so a
   minimal failing trace doesn't have to drag a shortest-path prefix along.
+
+  Deleting one token doesn't just shorten the value by one item — because
+  each continuation token's `pick_index` is read modulo the *current*
+  enabled/disabled list's length, and that list depends on the possible set
+  `P` at that position, removing an earlier token can shift every later
+  token into a different position against a different `P`, which can
+  reinterpret the same `pick_index`/`bucket` roll into a different action
+  entirely. This is expected and harmless for shrinking (StreamData just
+  checks whether the resulting, possibly-different value still fails), but
+  means a shrunk value's tokens shouldn't be read as "the same choices with
+  one removed."
+
+  If `generator/3` finds no reachable, declared-action target edge at all
+  (an empty `entries` list — e.g. a graph with no edges from the initial
+  state under the declared external/internal actions), `targeted?` and
+  `target_index` are simply never consulted and every value is pure
+  continuation from `closure(initial)`: the generator degrades to the
+  random walk described below with no targeted prefix, rather than failing.
 
   ## Forced settle (fair internal actions)
 
@@ -112,9 +137,11 @@ defmodule Outlaw.Conformance.Walk do
   means it's unreachable this way.
 
   Runs a single BFS from `closure(from_states, internal)` with parent
-  pointers (O(V+E) over the states/edges actually visited), then
-  reconstructs the path by walking parents backward once — no per-target
-  re-search, no repeated list-append while searching.
+  pointers, visiting each state at most once (O(V+E) in the external-action
+  edges, plus one closure computation per newly-discovered state — see the
+  moduledoc for why that isn't a flat O(V+E) in the presence of internal
+  actions), then reconstructs the path by walking parents backward once — no
+  per-target re-search, no repeated list-append while searching.
   """
   @spec shortest_path(
           StateGraph.t(),

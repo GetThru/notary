@@ -2,7 +2,7 @@ defmodule Outlaw.Conformance.WalkTest do
   use ExUnit.Case, async: true
 
   alias Outlaw.{Config, Fixtures, StateGraph}
-  alias Outlaw.Conformance.Walk
+  alias Outlaw.Conformance.{Runner, Walk}
 
   alias Outlaw.Fixtures.{AsyncSpec, BankSpec, CounterSpec, WorkflowSpec}
 
@@ -89,19 +89,22 @@ defmodule Outlaw.Conformance.WalkTest do
     if Map.has_key?(actions, action), do: path ++ [action], else: path ++ [:settle]
   end
 
-  # Whether `steps` begins with exactly the action-name sequence `names`
-  # (params ignored).
-  defp starts_with_names?(steps, names) do
-    prefix = Enum.take(steps, length(names))
+  # Whether `target` is in the abstract possible set after folding
+  # `advance/4` (Outlaw.Conformance.Walk.advance/4) over only the *first* `k`
+  # items of `steps` -- i.e. whether the walk reached `target` within its
+  # first `k` emitted items, regardless of what the rest of the value does.
+  defp reaches_within?(graph, internal, steps, target, k) do
+    initial = Walk.closure(graph, StateGraph.initial_states(graph), internal)
 
-    length(prefix) == length(names) and
-      prefix
-      |> Enum.zip(names)
-      |> Enum.all?(fn
-        {:settle, :settle} -> true
-        {{name, _params}, name} -> true
-        _ -> false
+    possible =
+      steps
+      |> Enum.take(k)
+      |> Enum.reduce(initial, fn
+        :settle, possible -> possible
+        {name, _params}, possible -> Walk.advance(graph, possible, name, internal)
       end)
+
+    target in possible
   end
 
   # -- structure ----------------------------------------------------------------
@@ -157,21 +160,6 @@ defmodule Outlaw.Conformance.WalkTest do
 
         assert seen == actions |> Map.keys() |> Enum.sort()
       end
-    end
-
-    test "a targeted value starts with the shortest path to its target's source" do
-      graph = Fixtures.graph("Counter")
-      actions = CounterSpec.actions()
-      gen = Walk.generator(graph, actions, [])
-      entries = target_entries(graph, actions, [])
-
-      assert entries != []
-
-      assert gen
-             |> values(100)
-             |> Enum.any?(fn steps ->
-               Enum.any?(entries, &starts_with_names?(steps, entry_names(actions, &1)))
-             end)
     end
 
     test "seed determinism: identical lists for the same seed" do
@@ -238,6 +226,45 @@ defmodule Outlaw.Conformance.WalkTest do
         end)
 
       assert hits / length(entries) >= 0.10
+    end
+
+    # Fix round 3 (controller review): the two tests above exercise
+    # `shortest_path/5` + `advance/4` directly, recomputing the same thing
+    # `Walk.generator/3` computes internally -- they'd pass even if
+    # `generator/3`'s own `prefix_plan/5`/`fold/8` wiring were completely
+    # broken (e.g. always skipping the prefix). This test goes through
+    # `Walk.generator/3` itself and would fail if that wiring broke: it
+    # measures how often x = 3 is reached within a generated value's first 3
+    # items (exactly the length of the deterministic prefix that targets the
+    # x2 -> x3 edge: ["Inc", "Inc", "Inc"]), and compares against the same
+    # metric on `Runner.steps_generator/2` (today's uniform generator, which
+    # has no targeting at all) as a control. Measured (seed 42, 300 values
+    # each): walk ~22.0%, uniform ~10.7%. If `prefix_plan`/`fold` stopped
+    # placing the deterministic prefix, the walk's continuation-only weights
+    # are close to a 50/50 Inc-vs-Reset choice at every state with both
+    # enabled (same ballpark as uniform), so this margin would collapse.
+    test "generated values reach x = 3 within 3 items notably more often than a uniform walk" do
+      graph = Fixtures.graph("Counter")
+      actions = CounterSpec.actions()
+      x3 = find_state(graph, &(&1["x"] == 3))
+
+      walk_gen = Walk.generator(graph, actions, [])
+      uniform_gen = Runner.steps_generator(actions, 50)
+
+      walk_rate =
+        walk_gen
+        |> values(300)
+        |> Enum.count(&reaches_within?(graph, [], &1, x3, 3))
+        |> Kernel./(300)
+
+      uniform_rate =
+        uniform_gen
+        |> values(300)
+        |> Enum.count(&reaches_within?(graph, [], &1, x3, 3))
+        |> Kernel./(300)
+
+      assert walk_rate >= 0.15
+      assert walk_rate - uniform_rate >= 0.08
     end
   end
 
