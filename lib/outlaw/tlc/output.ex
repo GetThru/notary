@@ -174,18 +174,29 @@ defmodule Outlaw.TLC.Output do
     {index, action, text} =
       case String.split(body, "\n", parts: 2) do
         [header, rest] ->
-          case Regex.run(~r/^(\d+): <(.*)>$/, header) do
-            [_, index, label] -> {String.to_integer(index), action_name(label), rest}
+          case parse_header(header) do
+            {index, label} -> {index, action_name(label), rest}
             nil -> {1, nil, body}
           end
 
         [only] ->
-          {1, nil, only}
+          case parse_header(only) do
+            {index, label} -> {index, action_name(label), ""}
+            nil -> {1, nil, only}
+          end
       end
 
-    case StateGraph.parse_state(text) do
-      {:ok, state} -> %{index: index, action: action, state: state}
-      {:error, _} -> %{index: index, action: action, state: %{}, raw: text}
+    case {String.trim(text), StateGraph.parse_state(text)} do
+      {"", _} -> %{index: index, action: action, state: %{}}
+      {_, {:ok, state}} -> %{index: index, action: action, state: state}
+      {_, {:error, _}} -> %{index: index, action: action, state: %{}, raw: text}
+    end
+  end
+
+  defp parse_header(header) do
+    case Regex.run(~r/^(\d+): <(.*)>$/, header) do
+      [_, index, label] -> {String.to_integer(index), label}
+      nil -> nil
     end
   end
 

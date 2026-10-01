@@ -75,4 +75,19 @@ defmodule Outlaw.TLC.OutputTest do
 
     assert e.details.output =~ "Exception"
   end
+
+  test "single-line trace step parses index and action from header" do
+    output = """
+    @!@!@STARTMSG 2110:1 @!@!@
+    Invariant Inv is violated.
+    @!@!@ENDMSG 2110 @!@!@
+    @!@!@STARTMSG 2217:4 @!@!@
+    2: <Inc line 6, col 8 to line 6, col 17 of module Counter>
+    @!@!@ENDMSG 2217 @!@!@
+    """
+
+    assert {:violation, v} = Output.interpret(Output.items(output), 12)
+    assert v.kind == :invariant
+    assert v.trace == [%{index: 2, action: "Inc", state: %{}}]
+  end
 end
