@@ -5,10 +5,12 @@ defmodule Outlaw.SpecTest do
 
   @moduletag :tmp_dir
 
-  defp write(dir, files), do: Enum.each(files, fn {name, body} -> File.write!(Path.join(dir, name), body) end)
+  defp write(dir, files),
+    do: Enum.each(files, fn {name, body} -> File.write!(Path.join(dir, name), body) end)
 
   test "discovers specs that have a .cfg, sorted", %{tmp_dir: dir} do
     write(dir, [{"B.tla", "b"}, {"B.cfg", ""}, {"A.tla", "a"}, {"A.cfg", ""}, {"Helper.tla", "h"}])
+
     assert [%Spec{name: "A"} = a, %Spec{name: "B"}] = Spec.discover(dir)
     assert a.tla_path == Path.join(dir, "A.tla")
     assert a.cfg_path == Path.join(dir, "A.cfg")

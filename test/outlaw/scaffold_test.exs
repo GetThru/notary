@@ -5,7 +5,12 @@ defmodule Outlaw.ScaffoldTest do
 
   @moduletag :tmp_dir
 
-  defp files(opts \\ []), do: Scaffold.files("CheckoutFlow", Keyword.merge([specs_dir: "specs", app_module: "MyApp"], opts))
+  defp files(opts \\ []),
+    do:
+      Scaffold.files(
+        "CheckoutFlow",
+        Keyword.merge([specs_dir: "specs", app_module: "MyApp"], opts)
+      )
 
   test "generates spec, cfg, AGENTS.md, mapping and test" do
     paths = Enum.map(files(), &elem(&1, 0))
@@ -20,11 +25,16 @@ defmodule Outlaw.ScaffoldTest do
 
     contents = Map.new(files(), fn {path, content, _} -> {path, content} end)
     assert contents["specs/CheckoutFlow.tla"] =~ "MODULE CheckoutFlow"
-    assert contents["test/outlaw/checkout_flow_spec.ex"] =~ "defmodule MyApp.Specs.CheckoutFlow do"
+
+    assert contents["test/outlaw/checkout_flow_spec.ex"] =~
+             "defmodule MyApp.Specs.CheckoutFlow do"
+
     assert contents["test/outlaw/checkout_flow_spec.ex"] =~ ~s(spec: "specs/CheckoutFlow.tla")
     assert contents["specs/AGENTS.md"] =~ "Never edit"
     assert {:ok, _} = Code.string_to_quoted(contents["test/outlaw/checkout_flow_spec.ex"])
-    assert {:ok, _} = Code.string_to_quoted(contents["test/outlaw/checkout_flow_conformance_test.exs"])
+
+    assert {:ok, _} =
+             Code.string_to_quoted(contents["test/outlaw/checkout_flow_conformance_test.exs"])
   end
 
   test "--no-mapping generates only spec files" do
