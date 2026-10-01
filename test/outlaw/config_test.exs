@@ -5,7 +5,8 @@ defmodule Outlaw.ConfigTest do
 
   setup do
     on_exit(fn ->
-      for key <- [:max_states, :work_dir, :tla2tools_path], do: Application.delete_env(:outlaw, key)
+      for key <- [:max_states, :work_dir, :tla2tools_path],
+          do: Application.delete_env(:outlaw, key)
     end)
   end
 
