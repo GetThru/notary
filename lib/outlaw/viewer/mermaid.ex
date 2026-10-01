@@ -21,7 +21,7 @@ defmodule Outlaw.Viewer.Mermaid do
         for(
           e <- model.edges,
           MapSet.member?(shown, e.source) and MapSet.member?(shown, e.target),
-          do: "    #{alias_of[e.source]} --> #{alias_of[e.target]} : #{e.action}"
+          do: "    #{alias_of[e.source]} --> #{alias_of[e.target]} : #{escape(e.action)}"
         ) ++ highlight_lines(model.highlight, alias_of)
 
     Enum.join(lines, "\n") <> "\n"
@@ -79,6 +79,7 @@ defmodule Outlaw.Viewer.Mermaid do
 
   defp escape(text) do
     text
+    |> String.replace("\n", " ")
     |> String.replace("\"", "#quot;")
     |> String.replace("<", "#lt;")
     |> String.replace(">", "#gt;")

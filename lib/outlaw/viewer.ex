@@ -118,10 +118,21 @@ defmodule Outlaw.Viewer do
 
   @spec read_failure(String.t()) :: {:ok, Failure.t()} | :error
   def read_failure(spec_name) do
-    case File.read(failure_term_path(spec_name)) do
-      {:ok, binary} -> {:ok, :erlang.binary_to_term(binary)}
-      {:error, _} -> :error
+    with {:ok, binary} <- File.read(failure_term_path(spec_name)),
+         {:ok, %Failure{} = failure} <- safe_decode(binary) do
+      {:ok, failure}
+    else
+      _ -> :error
     end
+  end
+
+  # Decodes a trusted-but-possibly-corrupt local file: `:safe` refuses to create new
+  # atoms, and a truncated/garbled binary raises ArgumentError instead of crashing
+  # the caller.
+  defp safe_decode(binary) do
+    {:ok, :erlang.binary_to_term(binary, [:safe])}
+  rescue
+    ArgumentError -> :error
   end
 
   defp failure_term_path(spec_name),

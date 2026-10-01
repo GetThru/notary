@@ -81,6 +81,17 @@ defmodule Outlaw.ViewerTest do
     assert Viewer.failure_model("Counter", graph, failure).highlight == [init]
   end
 
+  test "read_failure returns :error for corrupt bytes or a term that isn't a Failure" do
+    corrupt_path = Path.join(Outlaw.Config.work_dir(), "Corrupt-failure.term")
+    File.mkdir_p!(Outlaw.Config.work_dir())
+    File.write!(corrupt_path, <<1, 2, 3, 255, 254>>)
+    assert Viewer.read_failure("Corrupt") == :error
+
+    wrong_shape_path = Path.join(Outlaw.Config.work_dir(), "NotAFailure-failure.term")
+    File.write!(wrong_shape_path, :erlang.term_to_binary(%{a: 1}))
+    assert Viewer.read_failure("NotAFailure") == :error
+  end
+
   describe "mermaid" do
     test "renders states, initial markers, labelled edges and highlight classes" do
       graph = Fixtures.graph("Counter")
@@ -103,6 +114,23 @@ defmodule Outlaw.ViewerTest do
       }
 
       assert Mermaid.render(model) =~ ~s(state "l = #lt;#lt;#quot;a#quot;#gt;#gt;" as s0)
+    end
+
+    test "escapes action labels and strips newlines from them" do
+      model = %{
+        title: "t",
+        note: nil,
+        nodes: [
+          %{id: "1", vars: %{"x" => "0"}, initial: true},
+          %{id: "2", vars: %{"x" => "1"}, initial: false}
+        ],
+        edges: [%{source: "1", target: "2", action: ~s(Weird"\n<action>)}],
+        highlight: []
+      }
+
+      text = Mermaid.render(model)
+      assert text =~ ~s(: Weird#quot; #lt;action#gt;)
+      refute text =~ "\n<action>"
     end
 
     test "truncates large graphs to the highlighted path or a BFS prefix" do

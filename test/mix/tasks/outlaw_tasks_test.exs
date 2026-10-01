@@ -81,6 +81,31 @@ defmodule Mix.Tasks.OutlawTasksTest do
     end
   end
 
+  test "outlaw.test still reports a conformance failure when the failure artifact can't be written",
+       %{specs: specs, work: work} do
+    {:ok, spec} = Outlaw.Spec.fetch("Counter", specs)
+    File.mkdir_p!(work)
+    # A directory sitting where Viewer.write_failure wants to write the failure
+    # term: File.write! can't write a file on top of a directory, so recording
+    # the artifact raises. The conformance failure must still be reported.
+    File.mkdir_p!(Path.join(work, "Counter-failure.term"))
+
+    result =
+      Outlaw.Verify.test_spec(spec, %{"Counter" => Outlaw.Fixtures.CounterBadResetSpec}, seed: 1)
+
+    assert %{
+             status: :fail,
+             stages: [
+               %{stage: :check, status: :pass},
+               %{
+                 stage: :conformance,
+                 status: :fail,
+                 payload: {:error, %Outlaw.Conformance.Failure{}}
+               }
+             ]
+           } = result
+  end
+
   test "outlaw.test reports specs with no mapping", %{specs: specs} do
     File.write!(
       Path.join(specs, "Lonely.tla"),

@@ -55,13 +55,23 @@ defmodule Outlaw.Verify do
             stage(:conformance, :pass, {:ok, summary})
 
           {:error, %Failure{} = failure} ->
-            Outlaw.Viewer.write_failure(spec.name, graph, failure)
+            write_failure_artifact(spec.name, graph, failure)
             stage(:conformance, :fail, {:error, failure})
 
           {:error, %Error{} = error} ->
             stage(:conformance, :error, {:error, error})
         end
     end
+  end
+
+  # Recording a failure artifact is a nice-to-have for `--trace failure`; if the
+  # work dir can't be written to (full disk, read-only mount, blocked path), the
+  # conformance failure itself must still be reported rather than crashing here.
+  defp write_failure_artifact(name, graph, failure) do
+    Outlaw.Viewer.write_failure(name, graph, failure)
+    :ok
+  rescue
+    _ in [File.Error, ArgumentError] -> :ok
   end
 
   defp missing_mapping(spec) do
