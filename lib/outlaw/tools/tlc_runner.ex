@@ -16,6 +16,7 @@ defmodule Outlaw.Tools.TLCRunner do
     timeout = Keyword.fetch!(opts, :timeout)
     max_states = Keyword.fetch!(opts, :max_states)
     cd = Keyword.get(opts, :cd, File.cwd!())
+    jvm_args = tmp_dir_args(opts) ++ ["-XX:+UseParallelGC", "-cp", jar, "tlc2.TLC"]
 
     port =
       Port.open({:spawn_executable, java}, [
@@ -25,7 +26,7 @@ defmodule Outlaw.Tools.TLCRunner do
         :hide,
         {:line, 65_536},
         {:cd, cd},
-        {:args, ["-XX:+UseParallelGC", "-cp", jar, "tlc2.TLC" | tlc_args]}
+        {:args, jvm_args ++ tlc_args}
       ])
 
     deadline = System.monotonic_time(:millisecond) + timeout
@@ -76,6 +77,20 @@ defmodule Outlaw.Tools.TLCRunner do
          Error.new(:tlc_timeout, "TLC did not finish within #{st.timeout}ms and was stopped.", %{
            output_tail: st.lines |> Enum.take(20) |> Enum.reverse() |> Enum.join("\n")
          })}
+    end
+  end
+
+  # TLC 1.7.4 extracts the standard modules (Naturals.tla, ...) bundled in the
+  # jar into java.io.tmpdir and parses them there. Without this, two concurrent
+  # JVMs sharing the OS-default java.io.tmpdir can overwrite/delete each
+  # other's extracted copies mid-parse, producing an intermittent SANY
+  # NullPointerException (surfaced to users as a confusing :spec_error). Each
+  # run already gets its own unique :tmp_dir (TLC.ex's metadir); pointing
+  # java.io.tmpdir at it gives each JVM its own extraction directory too.
+  defp tmp_dir_args(opts) do
+    case Keyword.get(opts, :tmp_dir) do
+      nil -> []
+      dir -> ["-Djava.io.tmpdir=#{dir}"]
     end
   end
 

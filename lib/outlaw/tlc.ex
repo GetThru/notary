@@ -68,7 +68,8 @@ defmodule Outlaw.TLC do
         jar: tools.jar,
         cd: spec.dir,
         timeout: Keyword.get(opts, :timeout, Config.get(:tlc_timeout)),
-        max_states: Keyword.get(opts, :max_states, Config.get(:max_states))
+        max_states: Keyword.get(opts, :max_states, Config.get(:max_states)),
+        tmp_dir: metadir
       ]
 
       try do

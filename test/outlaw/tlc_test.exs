@@ -53,6 +53,18 @@ defmodule Outlaw.TLCTest do
       assert [{:ok, _}, {:ok, _}] = Task.await_many(tasks, 60_000)
     end
 
+    test "6 concurrent runs of a spec that EXTENDS Naturals do not collide on java.io.tmpdir" do
+      # TLC extracts standard modules (Naturals.tla, ...) from the jar into
+      # java.io.tmpdir and parses them there; without a per-run -Djava.io.tmpdir
+      # pointed at that run's own metadir, concurrent JVMs can overwrite/delete
+      # each other's extracted copies mid-parse, intermittently producing a
+      # SANY NullPointerException (surfaced as a confusing :spec_error).
+      {:ok, spec} = Spec.fetch("Counter", "test/fixtures/specs")
+      tasks = for _ <- 1..6, do: Task.async(fn -> TLC.check(spec) end)
+      results = Task.await_many(tasks, 120_000)
+      assert Enum.all?(results, &match?({:ok, _}, &1)), inspect(results)
+    end
+
     test "state limit stops TLC" do
       {:ok, spec} = Spec.fetch("Bank", "test/fixtures/specs")
       assert {:error, %Outlaw.Error{kind: :too_many_states}} = TLC.check(spec, max_states: 2)
