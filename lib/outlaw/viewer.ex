@@ -126,18 +126,19 @@ defmodule Outlaw.Viewer do
     end
   end
 
-  # Decodes a trusted-but-possibly-corrupt local file: `:safe` refuses to create new
-  # atoms, and a truncated/garbled binary raises ArgumentError instead of crashing
-  # the caller. The file is written by a *different* `mix` process (e.g. `mix
-  # outlaw.test`) than the one that later reads it (e.g. `mix outlaw.graph`), so
-  # the atoms embedded in the term (failure kinds, detail keys like `:during`)
-  # are not guaranteed to already exist in this fresh VM's atom table unless the
-  # modules that mention them as literals have been loaded here too.
+  # Decodes a trusted, but possibly corrupt or truncated, local file: this is an
+  # artifact Outlaw itself writes under `_build`, never attacker-controlled input,
+  # so we deliberately don't pass `:safe` here. `:safe` would refuse to create
+  # atoms that aren't already registered in *this* VM's atom table, but a failure
+  # can legitimately contain atoms that only exist because of the user's own
+  # code (e.g. a `{:rejected, reason}` atom from their mapping's `action/3`, or a
+  # raw value in `details.got`) — atoms this reading process (e.g. `mix
+  # outlaw.graph`, which never compiles/starts the app) has no way to have
+  # pre-registered. A truncated/garbled binary still raises ArgumentError instead
+  # of crashing the caller, and the `%Failure{}` match in `read_failure/1` guards
+  # against a well-formed term of the wrong shape.
   defp safe_decode(binary) do
-    Code.ensure_loaded(Failure)
-    Code.ensure_loaded(Step)
-    Code.ensure_loaded(Outlaw.Conformance.Runner)
-    {:ok, :erlang.binary_to_term(binary, [:safe])}
+    {:ok, :erlang.binary_to_term(binary)}
   rescue
     ArgumentError -> :error
   end

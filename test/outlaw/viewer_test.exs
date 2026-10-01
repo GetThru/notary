@@ -92,6 +92,55 @@ defmodule Outlaw.ViewerTest do
     assert Viewer.read_failure("NotAFailure") == :error
   end
 
+  test "read_failure decodes a failure containing an atom unknown to this process" do
+    # A recorded failure can legitimately contain atoms that exist only because of
+    # the *user's* code (e.g. a `{:rejected, reason}` atom from their mapping's
+    # action/3, or a raw value under `details.got`). The reading process (e.g.
+    # `mix outlaw.graph`, which never compiles or starts the consumer app) has no
+    # way to have that atom already registered in its atom table. Simulate this by
+    # encoding a failure, then swapping a placeholder atom's name for a same-length
+    # name we never turn into an atom ourselves, so the only way this test passes
+    # is if `read_failure/1` can materialize a brand-new atom from the file.
+    placeholder = "outlaw_placeholder_atom_x1"
+
+    failure = %Failure{
+      kind: :rejected_with_side_effect,
+      seed: 1,
+      steps: [
+        %Step{index: 0, outcome: :ok, projection: %{"x" => 0}, candidates: ["s0"]},
+        %Step{
+          index: 1,
+          action: "Inc",
+          outcome: {:rejected, String.to_atom(placeholder)},
+          projection: %{"x" => 0},
+          candidates: ["s0"]
+        }
+      ]
+    }
+
+    new_name =
+      placeholder
+      |> byte_size()
+      |> :crypto.strong_rand_bytes()
+      |> :binary.bin_to_list()
+      |> Enum.map(&(rem(&1, 26) + ?a))
+      |> List.to_string()
+
+    binary =
+      failure
+      |> :erlang.term_to_binary()
+      |> :binary.replace(placeholder, new_name)
+
+    path = Path.join(Outlaw.Config.work_dir(), "Unknown-failure.term")
+    File.mkdir_p!(Outlaw.Config.work_dir())
+    File.write!(path, binary)
+
+    assert {:ok, %Failure{steps: [_init, %Step{outcome: {:rejected, reason}}]}} =
+             Viewer.read_failure("Unknown")
+
+    assert Atom.to_string(reason) == new_name
+  end
+
   describe "mermaid" do
     test "renders states, initial markers, labelled edges and highlight classes" do
       graph = Fixtures.graph("Counter")
