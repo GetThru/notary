@@ -6,7 +6,8 @@ specifications**. They are the contract for what the code must do.
 ## Never
 - Never edit `.tla`, `.cfg` or `.outlaw.lock` files.
 - Never run `mix outlaw.lock`. Only the human runs it, after reviewing a spec change.
-- Never weaken a mapping module (for example by not observing a variable) just
+- Never weaken a mapping module (for example by not observing a variable, or
+  marking an action `internal:` just to avoid generating or checking it) just
   to make verification pass.
 
 If a spec looks wrong, ambiguous or impossible to implement, stop and ask the human.
@@ -16,10 +17,13 @@ If a spec looks wrong, ambiguous or impossible to implement, stop and ask the hu
    an action. Guards (the conditions in an action) say when it is allowed.
 2. Write the implementation in `lib/`.
 3. Complete the mapping module in `test/outlaw/` (`use Outlaw.Conformance`):
-   `init/0` starts the implementation, `actions/0` lists every action with a
-   params generator, `action/3` performs it (returning `{:rejected, reason, ctx}`
-   when the implementation refuses, without changing state), and `project/1`
-   returns the spec's variables.
+   `init/0` starts the implementation, `actions/0` lists every *external*
+   action with a params generator, `action/3` performs it (returning
+   `{:rejected, reason, ctx}` when the implementation refuses, without
+   changing state), and `project/1` returns the spec's variables. If the spec
+   models an action the implementation performs on its own (a GenServer
+   reacting to a message, a watchdog, ...) rather than on request, declare it
+   with `internal: ["TheAction"]` instead of putting it in `actions/0`.
 4. Run `mix outlaw.verify --json`. The last line of output is a JSON report.
 
 ## When verification fails

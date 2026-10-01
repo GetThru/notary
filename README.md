@@ -57,9 +57,32 @@ end
   model values are `model("u1")`, sets are `set([...])`, sequences are lists,
   records are maps with string keys.
 - Actions that the spec forbids must return `{:rejected, reason, ctx}` with
-  state unchanged. Outlaw checks guards too.
+  state unchanged except for internal reactions (see `internal:` below).
+  Outlaw checks guards too.
 - Model the outside world (time, failing services) as spec actions, and have
   the mapping drive a stub.
+
+### Internal actions
+
+Some spec actions happen *inside* the implementation on their own, never on
+request: a GenServer reacting to a message, a watchdog reaping a dead process,
+a limit check killing a run. The mapping can't invoke these, and checking
+state right after the triggering step would race the reaction.
+
+```elixir
+use Outlaw.Conformance, spec: "specs/Watchdog.tla", internal: ["Reap"]
+```
+
+Internal actions are excluded from `actions/0` (and must not be a key of it):
+the runner never generates them as driven steps. Instead it treats the
+implementation as free to take any number of them at any time, tracking every
+state reachable through zero or more internal transitions (their *closure*)
+alongside each driven step. At the end of a run, it *settles*: it waits for
+the implementation to reach a candidate state where no internal action the
+*spec* marks fair is enabled (self-loops don't count). Fairness is read from
+the spec's own text (`WF_vars(Reap)`, `SF_vars(...)`, ...), not assumed for
+every declared internal action — an internal action the spec never marks fair
+is never required to fire.
 
 ## Seeing the state space
 
@@ -73,7 +96,13 @@ mix outlaw.graph Bank --format mermaid            # for PRs and LLMs
 
 Actions are driven sequentially, so code-level races are not exercised. TLC
 still checks the design across all interleavings. Liveness is checked only on
-the spec. Keep `.cfg` constants small.
+the spec, plus the bounded settle check for fair internal actions (above).
+Keep `.cfg` constants small.
+
+Random generation can miss rare paths or bugs: measured on Outlaw's own
+`specs/TLCRunner.tla`, a missing watchdog is only caught on about 5 of 6
+default (100-run) `mix outlaw.verify` runs, and a missing state-limit kill on
+only about 1 of 8. Raise `--max-runs` for specs where that matters.
 
 ## Developing Outlaw
 
@@ -81,5 +110,6 @@ the spec. Keep `.cfg` constants small.
 nix develop
 mix deps.get && mix run -e 'Outlaw.Tools.install()'
 mix test --include tlc                 # add --include e2e for the end-to-end test
+mix outlaw.verify --max-runs 1000
 mix run test/fixtures/regen_graphs.exs # after changing fixture specs
 ```
