@@ -94,6 +94,24 @@ defmodule Outlaw.Conformance do
     end
   end
 
+  @doc """
+  ExUnit-friendly conformance check for plain `mix test`:
+
+      test "Bank conforms", do: Outlaw.Conformance.assert_conforms(MyApp.Specs.Bank)
+  """
+  @spec assert_conforms(module(), keyword()) :: :ok
+  def assert_conforms(module, opts \\ []) do
+    spec = spec(module)
+    result = Outlaw.Verify.test_spec(spec, %{spec.name => module}, opts)
+
+    if result.status == :pass do
+      :ok
+    else
+      report = Outlaw.Report.format(%{status: :fail, lock: nil, specs: [result]})
+      raise Error.new(:conformance_failed, report)
+    end
+  end
+
   @spec discover_mappings(atom()) :: %{String.t() => module()}
   def discover_mappings(app) do
     Application.load(app)
