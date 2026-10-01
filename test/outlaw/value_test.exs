@@ -72,6 +72,18 @@ defmodule Outlaw.ValueTest do
       assert Value.to_tla(true) == "TRUE"
       assert Value.to_tla(%{}) == "<<>>"
     end
+
+    test "falls back to inspect/1 for values outside the representation instead of raising" do
+      assert Value.to_tla(nil) == "nil"
+      assert Value.to_tla(:pending) == ":pending"
+      assert Value.to_tla(1.5) == "1.5"
+      assert Value.to_tla({:a, :b}) == "{:a, :b}"
+      assert Value.to_tla(%URI{}) == inspect(%URI{})
+    end
+
+    test "a map with atom keys does not crash (falls into the function-value branch)" do
+      assert Value.to_tla(%{status: nil}) == "(:status :> nil)"
+    end
   end
 
   property "parse(to_tla(v)) round-trips" do

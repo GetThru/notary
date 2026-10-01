@@ -150,6 +150,28 @@ defmodule Outlaw.Fixtures.CounterBadProjectionSpec do
   def project(_pid), do: %{"x" => 0, "extra" => 1}
 end
 
+defmodule Outlaw.Fixtures.CounterBadProjectionValueSpec do
+  @moduledoc false
+  # Bug: project/1 returns a value outside the Outlaw.Value representation
+  # (regression fixture for the :invalid_projection value-validation finding).
+  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+  def init, do: Agent.start_link(fn -> 0 end)
+  def actions, do: %{"Inc" => StreamData.constant(%{})}
+  def action("Inc", _, pid), do: {:ok, pid}
+  def project(_pid), do: %{"x" => nil}
+end
+
+defmodule Outlaw.Fixtures.CounterBadInitResultSpec do
+  @moduledoc false
+  # Bug: init/0 returns something other than {:ok, ctx} (regression fixture for
+  # the :invalid_action_result finding on init/0's own contract).
+  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+  def init, do: :ok
+  def actions, do: %{"Inc" => StreamData.constant(%{})}
+  def action("Inc", _, pid), do: {:ok, pid}
+  def project(pid), do: %{"x" => pid}
+end
+
 defmodule Outlaw.Fixtures.CounterRaisingSpec do
   @moduledoc false
   use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false

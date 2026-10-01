@@ -31,6 +31,38 @@ defmodule Outlaw.Value do
   @spec set(Enumerable.t()) :: MapSet.t()
   def set(enum), do: MapSet.new(enum)
 
+  @doc """
+  Finds the first value that is not in the Outlaw.Value representation,
+  searching recursively into sets, lists, and map keys/values. Returns `nil`
+  if `value` (and everything nested in it) is valid.
+  """
+  @spec invalid_leaf(term()) :: {:invalid, term()} | nil
+  def invalid_leaf(v) when is_integer(v) or is_boolean(v) or is_binary(v), do: nil
+  def invalid_leaf({:model_value, name}) when is_binary(name), do: nil
+  def invalid_leaf(%MapSet{} = s), do: find_invalid(Enum.to_list(s))
+  def invalid_leaf(list) when is_list(list), do: find_invalid(list)
+
+  def invalid_leaf(map) when is_map(map) and not is_struct(map),
+    do: find_invalid(Enum.flat_map(map, fn {k, v} -> [k, v] end))
+
+  def invalid_leaf(other), do: {:invalid, other}
+
+  defp find_invalid(items) do
+    Enum.find_value(items, fn item -> invalid_leaf(item) end)
+  end
+
+  @doc "A short, human-readable name for the type of a value (for error hints)."
+  @spec type_name(term()) :: String.t()
+  def type_name(nil), do: "nil"
+  def type_name(v) when is_atom(v), do: "atom"
+  def type_name(v) when is_float(v), do: "float"
+  def type_name(v) when is_tuple(v), do: "tuple"
+  def type_name(v) when is_struct(v), do: "struct"
+  def type_name(v) when is_function(v), do: "function"
+  def type_name(v) when is_pid(v), do: "pid"
+  def type_name(v) when is_reference(v), do: "reference"
+  def type_name(_), do: "value"
+
   @spec parse(binary()) :: {:ok, t()} | {:error, {:unparseable_value, binary()}}
   def parse(raw) when is_binary(raw) do
     with {:ok, tokens} <- tokenize(raw, []),
@@ -170,9 +202,9 @@ defmodule Outlaw.Value do
   def to_tla({:model_value, name}), do: name
   def to_tla(%MapSet{} = set), do: "{" <> join(Enum.sort(set)) <> "}"
   def to_tla(list) when is_list(list), do: "<<" <> join(list) <> ">>"
-  def to_tla(map) when map_size(map) == 0, do: "<<>>"
+  def to_tla(map) when is_map(map) and not is_struct(map) and map_size(map) == 0, do: "<<>>"
 
-  def to_tla(map) when is_map(map) do
+  def to_tla(map) when is_map(map) and not is_struct(map) do
     sorted = Enum.sort(map)
 
     if Enum.all?(Map.keys(map), &record_key?/1) do
@@ -181,6 +213,14 @@ defmodule Outlaw.Value do
       "(" <> Enum.map_join(sorted, " @@ ", fn {k, v} -> "#{to_tla(k)} :> #{to_tla(v)}" end) <> ")"
     end
   end
+
+  # Fallback for values outside the Outlaw.Value representation (nil, atoms,
+  # floats, tuples, structs, ...). `to_tla/1` is used when rendering reports
+  # and the viewer for failures whose mapping produced such a value (e.g. a
+  # mistyped `project/1`), so it must never raise — see Outlaw.Conformance.Runner's
+  # `:invalid_projection` check, which validates values before they get this far
+  # in the normal case, and this fallback, which keeps rendering safe regardless.
+  def to_tla(other), do: inspect(other)
 
   defp join(values), do: Enum.map_join(values, ", ", &to_tla/1)
 

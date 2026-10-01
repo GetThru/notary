@@ -27,7 +27,8 @@ defmodule Outlaw.Conformance.Failure do
       "The implementation accepted an action the spec does not allow in this state. It should have returned {:rejected, reason, ctx}.",
     rejected_with_side_effect:
       "The implementation rejected the action, but its observable state changed.",
-    invalid_projection: "project/1 must return exactly the observed spec variables.",
+    invalid_projection:
+      "project/1 must return exactly the observed spec variables, with every value in the Outlaw.Value representation.",
     invalid_action_result: "action/3 must return {:ok, ctx} or {:rejected, reason, ctx}.",
     exception: "The mapping module or the implementation raised an exception.",
     timeout: "A callback did not return within the action timeout.",

@@ -37,6 +37,53 @@ defmodule Outlaw.ReportTest do
       specs: [%{spec: "Bank", status: status, stages: stages}]
     }
 
+  test "format and to_json do not raise for mistyped projection values (nil/atom/tuple)" do
+    failure = %Failure{
+      kind: :invalid_projection,
+      seed: 7,
+      steps: [
+        %Step{
+          index: 0,
+          outcome: :ok,
+          projection: %{"status" => nil},
+          allowed: [%{"status" => "open"}]
+        },
+        %Step{
+          index: 1,
+          action: "Go",
+          params: %{},
+          outcome: :ok,
+          projection: %{"status" => :pending, "extra" => {:a, :b}},
+          candidates: [],
+          allowed: []
+        }
+      ],
+      details: %{variable: "status", value: :pending, message: "bad value"}
+    }
+
+    report = %{
+      status: :fail,
+      lock: nil,
+      specs: [
+        %{
+          spec: "Bank",
+          status: :fail,
+          stages: [%{stage: :conformance, status: :fail, payload: {:error, failure}}]
+        }
+      ]
+    }
+
+    text = Report.format(report)
+    assert text =~ "status = nil"
+    assert text =~ "status = :pending"
+    assert text =~ "extra = {:a, :b}"
+
+    json = Report.to_json(report)
+    encoded = JSON.encode!(json)
+    assert is_binary(encoded)
+    assert %{"specs" => [_]} = JSON.decode!(encoded)
+  end
+
   test "format_state uses TLA+ syntax" do
     assert Report.format_state(%{"b" => Value.set([1]), "a" => "x"}) == ~S(a = "x", b = {1})
   end

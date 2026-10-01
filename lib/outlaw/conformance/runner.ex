@@ -6,7 +6,7 @@ defmodule Outlaw.Conformance.Runner do
   to it by `init/0` are cleaned up.
   """
 
-  alias Outlaw.{Config, StateGraph}
+  alias Outlaw.{Config, StateGraph, Value}
   alias Outlaw.Conformance.{Failure, Step}
 
   @spec check(module(), StateGraph.t(), [String.t()], keyword()) ::
@@ -162,7 +162,7 @@ defmodule Outlaw.Conformance.Runner do
   end
 
   defp execute(m, graph, observe, steps, notify) do
-    {:ok, ctx} = call(notify, "init/0", fn -> m.init() end)
+    ctx = init_ctx(m, notify)
     p0 = project(m, ctx, observe, notify)
     initial = StateGraph.initial_states(graph)
     allowed = initial |> Enum.map(&observed(graph, &1, observe)) |> Enum.uniq()
@@ -193,6 +193,22 @@ defmodule Outlaw.Conformance.Runner do
     e -> {:fail, :exception, %{exception: Exception.format(:error, e, __STACKTRACE__)}}
   catch
     {:outlaw_fail, kind, details} -> {:fail, kind, details}
+  end
+
+  defp init_ctx(m, notify) do
+    case call(notify, "init/0", fn -> m.init() end) do
+      {:ok, ctx} ->
+        ctx
+
+      other ->
+        throw(
+          {:outlaw_fail, :invalid_action_result,
+           %{
+             got: inspect(other),
+             message: "init/0 must return {:ok, ctx}, got: #{inspect(other)}"
+           }}
+        )
+    end
   end
 
   defp walk(_m, _graph, _observe, [], _i, ctx, _p, _candidates, _notify), do: {:ok, ctx}
@@ -260,9 +276,37 @@ defmodule Outlaw.Conformance.Runner do
     got = if is_map(projection), do: projection |> Map.keys() |> Enum.sort(), else: projection
     expected = Enum.sort(observe)
 
-    if got == expected,
-      do: projection,
-      else: throw({:outlaw_fail, :invalid_projection, %{got: got, expected: expected}})
+    cond do
+      got != expected ->
+        throw({:outlaw_fail, :invalid_projection, %{got: got, expected: expected}})
+
+      (bad = first_invalid_entry(projection)) != nil ->
+        {var, value} = bad
+
+        throw(
+          {:outlaw_fail, :invalid_projection,
+           %{variable: var, value: value, message: invalid_value_hint(var, value)}}
+        )
+
+      true ->
+        projection
+    end
+  end
+
+  defp first_invalid_entry(projection) when is_map(projection) do
+    Enum.find_value(projection, fn {var, value} ->
+      case Value.invalid_leaf(value) do
+        {:invalid, bad} -> {var, bad}
+        nil -> nil
+      end
+    end)
+  end
+
+  defp first_invalid_entry(_projection), do: nil
+
+  defp invalid_value_hint(var, value) do
+    "value for #{inspect(var)} is #{inspect(value)} (#{Value.type_name(value)}); " <>
+      "use strings, model/1 for model values, or set/1 for sets"
   end
 
   defp observed(graph, id, observe), do: graph |> StateGraph.state(id) |> Map.take(observe)

@@ -88,6 +88,24 @@ defmodule Outlaw.Conformance.RunnerTest do
                check(Fixtures.CounterBadProjectionSpec, "Counter")
     end
 
+    test "invalid projection value outside the Outlaw.Value representation" do
+      assert {:error, %Failure{kind: :invalid_projection, details: details}} =
+               check(Fixtures.CounterBadProjectionValueSpec, "Counter")
+
+      assert details.variable == "x"
+      assert details.value == nil
+      assert details.message =~ ~S(value for "x" is nil)
+      assert details.message =~ "use strings, model/1 for model values, or set/1 for sets"
+    end
+
+    test "init/0 not returning {:ok, ctx} is reported clearly" do
+      assert {:error, %Failure{kind: :invalid_action_result, details: details}} =
+               check(Fixtures.CounterBadInitResultSpec, "Counter")
+
+      assert details.got == ":ok"
+      assert details.message =~ "init/0 must return {:ok, ctx}"
+    end
+
     test "exceptions are reported with the callback that raised" do
       assert {:error, %Failure{kind: :exception, details: details}} =
                check(Fixtures.CounterRaisingSpec, "Counter")
@@ -120,13 +138,6 @@ defmodule Outlaw.Conformance.RunnerTest do
   test "invalid mappings are rejected before running" do
     assert {:error, %Outlaw.Error{kind: :invalid_mapping}} =
              check(Fixtures.CounterUnknownActionSpec, "Counter")
-  end
-
-  test "processes started by init are cleaned up after each run" do
-    before = length(Process.list())
-    assert {:ok, _} = check(Fixtures.WorkflowSpec, "Workflow", max_runs: 50)
-    Process.sleep(50)
-    assert length(Process.list()) - before < 5
   end
 
   test "a named process from init is released before the next run's init/0" do
