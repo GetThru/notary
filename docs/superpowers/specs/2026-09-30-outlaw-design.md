@@ -189,25 +189,56 @@ actions (e.g. `Tick`, `PaymentDeclined`); the mapping's `action/3` for them
 drives a stub (Mox expectation, Agent-backed fake). The `outlaw.new` template and
 docs demonstrate the pattern.
 
+### 4.3 Internal actions (Phase 1.5)
+
+Some spec actions are performed by the implementation *on its own*, in reaction
+to an event, not on request: a GenServer handling a message, a watchdog reaping a
+process, a limit check killing a run. The mapping cannot invoke these, and
+checking state right after the triggering step would race the reaction.
+
+`use Outlaw.Conformance, spec: ..., internal: ["LimitKill", "Reap"]` declares
+them. Internal actions must exist in the graph and must not appear in
+`actions/0` (validated, `:invalid_mapping`). The runner never generates them;
+instead it treats the implementation as free to take any number of internal
+steps at any time (§5, `closure`).
+
+Internal actions are treated as **weakly fair** (matching `WF_vars(...)` in the
+spec): an enabled reaction must eventually happen. At the end of every run that
+declares internal actions, the runner *settles*: it re-projects every 10 ms for up
+to `settle_timeout` (config, default 1_000 ms) until the implementation is in a
+candidate state where no internal action is enabled (internal self-loops don't
+count). A projection outside `closure(C)` fails `:illegal_transition`; timing out
+fails `:internal_action_stalled` with the still-enabled internal actions in the
+details. This is a bounded, runtime form of liveness for reactions only — full
+liveness remains TLC's job on the spec.
+
+Asynchrony can make a run non-repeatable, so shrinking may stop at a longer
+trace. Mappings should make external actions synchronous where they can (e.g.
+wait for an acknowledgement before returning `{:ok, ctx}`).
+
 ## 5. Conformance run semantics
 
-Per StreamData run:
+Per StreamData run. `closure(S)` is every state reachable from `S` through zero
+or more edges labelled with an internal action (§4.3); with no internal actions
+it is `S` itself, and the rules below reduce to the Phase 1 semantics.
 
-1. Load graph (cache or TLC). `C := initial_states(graph)`.
+1. Load graph (cache or TLC). `C := closure(initial_states(graph))`.
 2. `init/0`; `p := project(ctx)`; `C := {s ∈ C : observed(s) = p}`. Empty → fail
    (`:init_mismatch`).
 3. Generate a sequence (length ≤ `max_steps`) of `{name, params}` from `actions/0`.
-   For each step:
-   - `E := {t : s ∈ C, t ∈ successors(graph, s, name)}`.
+   For each step, with `B := closure(C)`:
+   - `E := {t : s ∈ B, t ∈ successors(graph, s, name)}`.
    - Call `action(name, params, ctx)` under `action_timeout`.
    - **Accepted while `E = ∅`**: fail (`:action_not_enabled`) — the
      implementation performed an action the spec forbids here.
    - **Accepted** `{:ok, ctx}` otherwise: `p' := project(ctx)`;
-     `C := {t ∈ E : observed(t) = p'}`. Empty → fail (`:illegal_transition`).
-   - **Rejected** `{:rejected, _, ctx}`: `project(ctx)` must equal previous `p`
-     (fail `:rejected_with_side_effect`). Otherwise always allowed; `C`
-     unchanged.
-4. `teardown/1`.
+     `C := {t ∈ closure(E) : observed(t) = p'}`. Empty → fail
+     (`:illegal_transition`).
+   - **Rejected** `{:rejected, _, ctx}`: `p' := project(ctx)`;
+     `C := {t ∈ B : observed(t) = p'}` (an internal step may have happened
+     meanwhile). Empty → fail (`:rejected_with_side_effect`).
+4. If internal actions are declared: settle (§4.3).
+5. `teardown/1`.
 
 On failure StreamData shrinks to the shortest failing sequence. The report shows,
 per step: action + params, implementation projection, candidate spec states, and
