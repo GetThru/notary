@@ -84,6 +84,16 @@ defmodule Outlaw.Conformance do
     end
   end
 
+  @spec check(module(), StateGraph.t(), keyword()) ::
+          {:ok, %{runs: non_neg_integer(), seed: integer()}}
+          | {:error, Outlaw.Conformance.Failure.t()}
+          | {:error, Error.t()}
+  def check(module, %StateGraph{} = graph, opts \\ []) do
+    with :ok <- validate(module, graph) do
+      Outlaw.Conformance.Runner.check(module, graph, observed_vars(module, graph), opts)
+    end
+  end
+
   @spec discover_mappings(atom()) :: %{String.t() => module()}
   def discover_mappings(app) do
     Application.load(app)
