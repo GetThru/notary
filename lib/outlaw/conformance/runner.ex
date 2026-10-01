@@ -16,13 +16,15 @@ defmodule Outlaw.Conformance.Runner do
     max_runs = Keyword.get(opts, :max_runs, Config.get(:max_runs))
     max_steps = Keyword.get(opts, :max_steps, Config.get(:max_steps))
     timeout = Keyword.get(opts, :action_timeout, Config.get(:action_timeout))
+    settle_timeout = Keyword.get(opts, :settle_timeout, Config.get(:settle_timeout))
+    internal = Map.get(module.__outlaw__(), :internal, [])
 
     generator = steps_generator(module.actions(), max_steps)
     options = [initial_seed: {0, 0, seed}, max_runs: max_runs, max_shrinking_steps: 500]
 
     result =
       StreamData.check_all(generator, options, fn steps ->
-        case run(module, graph, observe, steps, timeout) do
+        case run(module, graph, observe, internal, steps, timeout, settle_timeout) do
           {:ok, _steps} -> {:ok, nil}
           {:error, failure} -> {:error, failure}
         end
@@ -44,9 +46,16 @@ defmodule Outlaw.Conformance.Runner do
     |> StreamData.list_of(max_length: max_steps)
   end
 
-  @spec run(module(), StateGraph.t(), [String.t()], [{String.t(), map()}], timeout()) ::
-          {:ok, [Step.t()]} | {:error, Failure.t()}
-  def run(module, graph, observe, steps, timeout) do
+  @spec run(
+          module(),
+          StateGraph.t(),
+          [String.t()],
+          [String.t()],
+          [{String.t(), map()}],
+          timeout(),
+          timeout()
+        ) :: {:ok, [Step.t()]} | {:error, Failure.t()}
+  def run(module, graph, observe, internal, steps, timeout, settle_timeout) do
     parent = self()
     ref = make_ref()
     callers = [parent | Process.get(:"$callers", [])]
@@ -55,7 +64,7 @@ defmodule Outlaw.Conformance.Runner do
       spawn_monitor(fn ->
         Process.put(:"$callers", callers)
         notify = fn event -> send(parent, {ref, :progress, event}) end
-        result = execute(module, graph, observe, steps, notify)
+        result = execute(module, graph, observe, internal, steps, notify, settle_timeout)
         stop_linked_children(timeout)
         send(parent, {ref, :done, result})
         exit(:shutdown)
@@ -161,12 +170,13 @@ defmodule Outlaw.Conformance.Runner do
     end
   end
 
-  defp execute(m, graph, observe, steps, notify) do
+  defp execute(m, graph, observe, internal, steps, notify, settle_timeout) do
     ctx = init_ctx(m, notify)
     p0 = project(m, ctx, observe, notify)
     initial = StateGraph.initial_states(graph)
-    allowed = initial |> Enum.map(&observed(graph, &1, observe)) |> Enum.uniq()
-    candidates = Enum.filter(initial, &(observed(graph, &1, observe) == p0))
+    closed_initial = closure(graph, initial, internal)
+    allowed = closed_initial |> Enum.map(&observed(graph, &1, observe)) |> Enum.uniq()
+    candidates = Enum.filter(closed_initial, &(observed(graph, &1, observe) == p0))
 
     notify.(
       {:step,
@@ -174,9 +184,30 @@ defmodule Outlaw.Conformance.Runner do
     )
 
     {result, ctx} =
-      if candidates == [],
-        do: {{:fail, :init_mismatch, %{}}, ctx},
-        else: walk(m, graph, observe, steps, 1, ctx, p0, candidates, notify)
+      if candidates == [] do
+        {{:fail, :init_mismatch, %{}}, ctx}
+      else
+        {res, ctx2, next_i, candidates_at_end} =
+          walk(m, graph, observe, internal, steps, 1, ctx, candidates, notify)
+
+        case res do
+          :ok when internal != [] ->
+            settle(
+              m,
+              graph,
+              observe,
+              internal,
+              ctx2,
+              next_i,
+              candidates_at_end,
+              notify,
+              settle_timeout
+            )
+
+          _ ->
+            {res, ctx2}
+        end
+      end
 
     if function_exported?(m, :teardown, 1) do
       # Deliberately not `call/3`: teardown runs after the pass/fail verdict
@@ -211,16 +242,19 @@ defmodule Outlaw.Conformance.Runner do
     end
   end
 
-  defp walk(_m, _graph, _observe, [], _i, ctx, _p, _candidates, _notify), do: {:ok, ctx}
+  defp walk(_m, _graph, _observe, _internal, [], i, ctx, candidates, _notify),
+    do: {:ok, ctx, i, candidates}
 
-  defp walk(m, graph, observe, [{name, params} | rest], i, ctx, p, candidates, notify) do
-    succ = candidates |> Enum.flat_map(&StateGraph.successors(graph, &1, name)) |> Enum.uniq()
+  defp walk(m, graph, observe, internal, [{name, params} | rest], i, ctx, candidates, notify) do
+    closed = closure(graph, candidates, internal)
+    succ = closed |> Enum.flat_map(&StateGraph.successors(graph, &1, name)) |> Enum.uniq()
 
     case call(notify, "action/3 #{name} #{inspect(params)}", fn -> m.action(name, params, ctx) end) do
       {:ok, ctx} ->
         p2 = project(m, ctx, observe, notify)
-        allowed = succ |> Enum.map(&observed(graph, &1, observe)) |> Enum.uniq()
-        next = Enum.filter(succ, &(observed(graph, &1, observe) == p2))
+        closed_succ = closure(graph, succ, internal)
+        allowed = closed_succ |> Enum.map(&observed(graph, &1, observe)) |> Enum.uniq()
+        next = Enum.filter(closed_succ, &(observed(graph, &1, observe) == p2))
 
         notify.(
           {:step,
@@ -236,13 +270,15 @@ defmodule Outlaw.Conformance.Runner do
         )
 
         cond do
-          succ == [] -> {{:fail, :action_not_enabled, %{}}, ctx}
-          next == [] -> {{:fail, :illegal_transition, %{}}, ctx}
-          true -> walk(m, graph, observe, rest, i + 1, ctx, p2, next, notify)
+          succ == [] -> {{:fail, :action_not_enabled, %{}}, ctx, i, []}
+          next == [] -> {{:fail, :illegal_transition, %{}}, ctx, i, []}
+          true -> walk(m, graph, observe, internal, rest, i + 1, ctx, next, notify)
         end
 
       {:rejected, reason, ctx} ->
         p2 = project(m, ctx, observe, notify)
+        allowed = closed |> Enum.map(&observed(graph, &1, observe)) |> Enum.uniq()
+        next = Enum.filter(closed, &(observed(graph, &1, observe) == p2))
 
         notify.(
           {:step,
@@ -252,14 +288,14 @@ defmodule Outlaw.Conformance.Runner do
              params: params,
              outcome: {:rejected, reason},
              projection: p2,
-             candidates: candidates,
-             allowed: [p]
+             candidates: next,
+             allowed: allowed
            }}
         )
 
-        if p2 == p,
-          do: walk(m, graph, observe, rest, i + 1, ctx, p, candidates, notify),
-          else: {{:fail, :rejected_with_side_effect, %{}}, ctx}
+        if next == [],
+          do: {{:fail, :rejected_with_side_effect, %{}}, ctx, i, []},
+          else: walk(m, graph, observe, internal, rest, i + 1, ctx, next, notify)
 
       other ->
         throw({:outlaw_fail, :invalid_action_result, %{got: inspect(other)}})
@@ -271,8 +307,8 @@ defmodule Outlaw.Conformance.Runner do
     fun.()
   end
 
-  defp project(m, ctx, observe, notify) do
-    projection = call(notify, "project/1", fn -> m.project(ctx) end)
+  defp project(m, ctx, observe, notify, label \\ "project/1") do
+    projection = call(notify, label, fn -> m.project(ctx) end)
     got = if is_map(projection), do: projection |> Map.keys() |> Enum.sort(), else: projection
     expected = Enum.sort(observe)
 
@@ -310,4 +346,122 @@ defmodule Outlaw.Conformance.Runner do
   end
 
   defp observed(graph, id, observe), do: graph |> StateGraph.state(id) |> Map.take(observe)
+
+  # -- internal actions / settle (Outlaw design spec §4.3, §5) -----------------
+
+  # Every state reachable from `states` through zero or more edges labelled
+  # with an internal action. With no internal actions this is `states` itself
+  # (same list, same order) so behaviour with `internal: []` is byte-for-byte
+  # unchanged from Phase 1.
+  defp closure(_graph, states, []), do: states
+
+  defp closure(graph, states, internal) do
+    states |> MapSet.new() |> closure_fixpoint(graph, internal) |> MapSet.to_list()
+  end
+
+  defp closure_fixpoint(set, graph, internal) do
+    grown =
+      Enum.reduce(internal, set, fn name, acc ->
+        Enum.reduce(set, acc, fn s, acc2 ->
+          graph |> StateGraph.successors(s, name) |> Enum.reduce(acc2, &MapSet.put(&2, &1))
+        end)
+      end)
+
+    if MapSet.equal?(grown, set), do: set, else: closure_fixpoint(grown, graph, internal)
+  end
+
+  # An internal action is "enabled" at a state for settling purposes if it has
+  # at least one successor other than the state itself: a pure self-loop can't
+  # be observed, so it never blocks settling (Outlaw design spec §4.3).
+  defp internal_enabled?(graph, state_id, name),
+    do: graph |> StateGraph.successors(state_id, name) |> Enum.any?(&(&1 != state_id))
+
+  defp settled_state?(graph, state_id, internal),
+    do: Enum.all?(internal, &(not internal_enabled?(graph, state_id, &1)))
+
+  defp pending_internal(graph, states, internal),
+    do:
+      Enum.filter(internal, fn name -> Enum.any?(states, &internal_enabled?(graph, &1, name)) end)
+
+  # Re-projects every 10ms until the implementation reaches a candidate state
+  # with no internal action enabled (weak fairness, bounded at runtime), or
+  # fails: `:illegal_transition` if the projection leaves closure(candidates)
+  # entirely, `:internal_action_stalled` if settle_timeout elapses first.
+  defp settle(m, graph, observe, internal, ctx, index, candidates, notify, settle_timeout) do
+    deadline = System.monotonic_time(:millisecond) + settle_timeout
+
+    settle_loop(
+      m,
+      graph,
+      observe,
+      internal,
+      ctx,
+      index,
+      candidates,
+      notify,
+      deadline,
+      settle_timeout
+    )
+  end
+
+  defp settle_loop(
+         m,
+         graph,
+         observe,
+         internal,
+         ctx,
+         index,
+         candidates,
+         notify,
+         deadline,
+         settle_timeout
+       ) do
+    p_now = project(m, ctx, observe, notify, "settle")
+    closed = closure(graph, candidates, internal)
+    allowed = closed |> Enum.map(&observed(graph, &1, observe)) |> Enum.uniq()
+    c_now = Enum.filter(closed, &(observed(graph, &1, observe) == p_now))
+
+    step = %Step{
+      index: index,
+      action: "(settle)",
+      params: nil,
+      outcome: :ok,
+      projection: p_now,
+      candidates: c_now,
+      allowed: allowed
+    }
+
+    cond do
+      c_now == [] ->
+        notify.({:step, step})
+        {{:fail, :illegal_transition, %{}}, ctx}
+
+      Enum.any?(c_now, &settled_state?(graph, &1, internal)) ->
+        notify.({:step, step})
+        {:ok, ctx}
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        notify.({:step, step})
+        pending = pending_internal(graph, c_now, internal)
+
+        {{:fail, :internal_action_stalled, %{pending: pending, settle_timeout: settle_timeout}},
+         ctx}
+
+      true ->
+        Process.sleep(10)
+
+        settle_loop(
+          m,
+          graph,
+          observe,
+          internal,
+          ctx,
+          index,
+          c_now,
+          notify,
+          deadline,
+          settle_timeout
+        )
+    end
+  end
 end

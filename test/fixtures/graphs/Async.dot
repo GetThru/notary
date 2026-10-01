@@ -1,0 +1,15 @@
+strict digraph DiskGraph {
+nodesep=0.35;
+subgraph cluster_graph {
+color="white";
+-53417098159636800 [label="status = \"idle\"",style = filled]
+-53417098159636800 -> -6166236677428674421 [label="Request",color="black",fontcolor="black"];
+-6166236677428674421 [label="status = \"pending\""];
+-6166236677428674421 -> 2876895226744592913 [label="Complete",color="black",fontcolor="black"];
+2876895226744592913 [label="status = \"done\""];
+2876895226744592913 -> -6166236677428674421 [label="Request",color="black",fontcolor="black"];
+{rank = same; -53417098159636800;}
+{rank = same; -6166236677428674421;}
+{rank = same; 2876895226744592913;}
+}
+}

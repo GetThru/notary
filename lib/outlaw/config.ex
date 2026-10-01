@@ -14,7 +14,8 @@ defmodule Outlaw.Config do
     max_states: 100_000,
     max_runs: 100,
     max_steps: 50,
-    action_timeout: 5_000
+    action_timeout: 5_000,
+    settle_timeout: 1_000
   ]
 
   @tla_version "1.7.4"

@@ -6,9 +6,23 @@ defmodule Outlaw.ConformanceTest do
 
   test "__outlaw__/0 records the mapping options" do
     assert Fixtures.BankSpec.__outlaw__() ==
-             %{spec_path: "test/fixtures/specs/Bank.tla", observe: ["balance"], discover: true}
+             %{
+               spec_path: "test/fixtures/specs/Bank.tla",
+               observe: ["balance"],
+               discover: true,
+               internal: []
+             }
 
     assert Conformance.spec(Fixtures.BankSpec).name == "Bank"
+  end
+
+  test "__outlaw__/0 includes declared internal actions" do
+    assert Fixtures.AsyncSpec.__outlaw__() == %{
+             spec_path: "test/fixtures/specs/Async.tla",
+             observe: nil,
+             discover: true,
+             internal: ["Complete"]
+           }
   end
 
   test "observed vars default to all spec variables" do
@@ -28,6 +42,23 @@ defmodule Outlaw.ConformanceTest do
 
     assert msg =~ "Decrement"
     assert msg =~ "nope"
+  end
+
+  test "validate rejects an internal action that is not a graph action" do
+    assert {:error, %Outlaw.Error{kind: :invalid_mapping, message: msg}} =
+             Conformance.validate(Fixtures.AsyncUnknownInternalSpec, Fixtures.graph("Async"))
+
+    assert msg =~ "Nope"
+  end
+
+  test "validate rejects an internal action that also appears in actions/0" do
+    assert {:error, %Outlaw.Error{kind: :invalid_mapping, message: msg}} =
+             Conformance.validate(
+               Fixtures.AsyncInternalAlsoExternalSpec,
+               Fixtures.graph("Async")
+             )
+
+    assert msg =~ "Complete"
   end
 
   test "discover_mappings finds discoverable mappings only" do

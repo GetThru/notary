@@ -1,7 +1,7 @@
 defmodule Outlaw.Conformance.RunnerTest do
   use ExUnit.Case, async: true
 
-  alias Outlaw.{Conformance, Fixtures}
+  alias Outlaw.{Config, Conformance, Fixtures}
   alias Outlaw.Conformance.{Failure, Runner, Step}
 
   defp check(module, graph_name, opts \\ []) do
@@ -23,6 +23,29 @@ defmodule Outlaw.Conformance.RunnerTest do
 
     test "Workflow with two actors and an external gateway" do
       assert {:ok, _} = check(Fixtures.WorkflowSpec, "Workflow")
+    end
+
+    test "Async: an internal action (Complete) fires on its own" do
+      assert {:ok, %{runs: 200, seed: 42}} = check(Fixtures.AsyncSpec, "Async")
+    end
+  end
+
+  describe "internal actions" do
+    test "a wrong completion target fails (illegal_transition or rejected_with_side_effect)" do
+      assert {:error, %Failure{kind: kind}} = check(Fixtures.AsyncWrongCompletionSpec, "Async")
+      assert kind in [:illegal_transition, :rejected_with_side_effect]
+    end
+
+    test "a missing reaction stalls settle with the pending internal action" do
+      assert {:error, %Failure{kind: :internal_action_stalled, details: details}} =
+               check(Fixtures.AsyncStalledSpec, "Async", settle_timeout: 50)
+
+      assert details.pending == ["Complete"]
+      assert details.settle_timeout == 50
+    end
+
+    test "Config.get(:settle_timeout) defaults to 1_000" do
+      assert Config.get(:settle_timeout) == 1_000
     end
   end
 

@@ -15,6 +15,7 @@ defmodule Outlaw.Conformance.Failure do
           | :exception
           | :timeout
           | :crashed
+          | :internal_action_stalled
 
   @type t :: %__MODULE__{kind: kind(), seed: integer() | nil, steps: [Step.t()], details: map()}
 
@@ -32,7 +33,9 @@ defmodule Outlaw.Conformance.Failure do
     invalid_action_result: "action/3 must return {:ok, ctx} or {:rejected, reason, ctx}.",
     exception: "The mapping module or the implementation raised an exception.",
     timeout: "A callback did not return within the action timeout.",
-    crashed: "The process running the implementation crashed."
+    crashed: "The process running the implementation crashed.",
+    internal_action_stalled:
+      "An internal action the spec requires to happen (weak fairness) never did within settle_timeout."
   }
 
   @spec new(kind(), [Step.t()], map()) :: t()

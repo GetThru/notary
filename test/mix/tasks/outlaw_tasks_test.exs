@@ -46,7 +46,7 @@ defmodule Mix.Tasks.OutlawTasksTest do
   test "outlaw.check passes and writes report.json", %{work: work} do
     {out, 0} = run_task("outlaw.check", ["--json"])
     assert %{"status" => "pass", "specs" => specs} = last_json(out)
-    assert Enum.map(specs, & &1["spec"]) == ["Bank", "Counter", "Workflow"]
+    assert Enum.map(specs, & &1["spec"]) == ["Async", "Bank", "Counter", "Workflow"]
     assert File.exists?(Path.join(work, "report.json"))
   end
 
@@ -126,7 +126,7 @@ defmodule Mix.Tasks.OutlawTasksTest do
     assert %{"lock" => %{"status" => "fail"}} = last_json(out)
 
     {lock_out, 0} = run_task("outlaw.lock", [])
-    assert lock_out =~ "Locked 6 spec files"
+    assert lock_out =~ "Locked 8 spec files"
 
     {out, 0} = run_task("outlaw.verify", ["--json", "--max-runs", "20"])
     assert %{"status" => "pass", "lock" => %{"status" => "pass"}} = last_json(out)

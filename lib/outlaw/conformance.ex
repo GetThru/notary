@@ -15,6 +15,15 @@ defmodule Outlaw.Conformance do
     * `:spec` (required): path to the `.tla` file, relative to the project root.
     * `:observe`: spec variables `project/1` returns (default: all).
     * `:discover`: set `false` to hide the module from `mix outlaw.test` discovery.
+    * `:internal`: names of spec actions the implementation performs on its own
+      (a GenServer reacting to a message, a watchdog, ...), never on request.
+      The runner never generates these as steps; instead it treats the
+      implementation as free to take any number of them at any time, and
+      *settles* at the end of each run — waiting (up to `Outlaw.Config`'s
+      `settle_timeout`, default 1 s) until none of them are enabled. Each name
+      must be an action in the spec's state graph and must not also appear as
+      a key of `actions/0` (validated, `:invalid_mapping`). See the Outlaw
+      design spec §4.3/§5.
 
   `project/1` must return values in the `Outlaw.Value` representation; `model/1`
   and `set/1` are imported. Prefer unnamed processes (or stop them in
@@ -36,6 +45,7 @@ defmodule Outlaw.Conformance do
     spec = Keyword.fetch!(opts, :spec)
     observe = Keyword.get(opts, :observe)
     discover = Keyword.get(opts, :discover, true)
+    internal = Keyword.get(opts, :internal, [])
 
     quote do
       @behaviour Outlaw.Conformance
@@ -43,7 +53,12 @@ defmodule Outlaw.Conformance do
 
       @doc false
       def __outlaw__,
-        do: %{spec_path: unquote(spec), observe: unquote(observe), discover: unquote(discover)}
+        do: %{
+          spec_path: unquote(spec),
+          observe: unquote(observe),
+          discover: unquote(discover),
+          internal: unquote(internal)
+        }
     end
   end
 
@@ -57,8 +72,11 @@ defmodule Outlaw.Conformance do
   @spec validate(module(), StateGraph.t()) :: :ok | {:error, Error.t()}
   def validate(module, %StateGraph{} = graph) do
     actions = module.actions() |> Map.keys() |> Enum.sort()
+    internal = Map.get(module.__outlaw__(), :internal, [])
     unknown_actions = Enum.reject(actions, &MapSet.member?(graph.actions, &1))
     unknown_vars = Enum.reject(observed_vars(module, graph), &(&1 in graph.variables))
+    unknown_internal = Enum.reject(internal, &MapSet.member?(graph.actions, &1))
+    internal_in_actions = Enum.filter(internal, &(&1 in actions))
 
     problems =
       [
@@ -67,7 +85,12 @@ defmodule Outlaw.Conformance do
           "actions/0 names actions that never occur in the spec's state graph: #{Enum.join(unknown_actions, ", ")}. " <>
             "Known actions: #{graph.actions |> Enum.sort() |> Enum.join(", ")}. (An action that is never enabled under the .cfg constants does not appear.)",
         unknown_vars != [] &&
-          "observe: lists variables the spec does not have: #{Enum.join(unknown_vars, ", ")}. Spec variables: #{Enum.join(graph.variables, ", ")}."
+          "observe: lists variables the spec does not have: #{Enum.join(unknown_vars, ", ")}. Spec variables: #{Enum.join(graph.variables, ", ")}.",
+        unknown_internal != [] &&
+          "internal: lists actions that never occur in the spec's state graph: #{Enum.join(unknown_internal, ", ")}. " <>
+            "Known actions: #{graph.actions |> Enum.sort() |> Enum.join(", ")}.",
+        internal_in_actions != [] &&
+          "internal: #{Enum.join(internal_in_actions, ", ")} must not also be a key of actions/0 (internal actions are never driven by the runner; see Outlaw.Conformance's :internal option)."
       ]
       |> Enum.filter(&is_binary/1)
 
