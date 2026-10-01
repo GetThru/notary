@@ -1,0 +1,31 @@
+# Specs: rules for LLM agents
+
+The `.tla` and `.cfg` files in this directory are **human-authored TLA+
+specifications**. They are the contract for what the code must do.
+
+## Never
+- Never edit `.tla`, `.cfg` or `.outlaw.lock` files.
+- Never run `mix outlaw.lock`. Only the human runs it, after reviewing a spec change.
+- Never weaken a mapping module (for example by not observing a variable) just
+  to make verification pass.
+
+If a spec looks wrong, ambiguous or impossible to implement, stop and ask the human.
+
+## Implementing a spec
+1. Read the spec: `Init` is the starting state, and each disjunct of `Next` is
+   an action. Guards (the conditions in an action) say when it is allowed.
+2. Write the implementation in `lib/`.
+3. Complete the mapping module in `test/outlaw/` (`use Outlaw.Conformance`):
+   `init/0` starts the implementation, `actions/0` lists every action with a
+   params generator, `action/3` performs it (returning `{:rejected, reason, ctx}`
+   when the implementation refuses, without changing state), and `project/1`
+   returns the spec's variables.
+4. Run `mix outlaw.verify --json`. The last line of output is a JSON report.
+
+## When verification fails
+- `check` failed: the spec itself has a problem. Report it to the human; do not fix it.
+- `conformance` failed: read `failure.kind`, `failure.explanation` and the
+  shrunk `failure.steps`. The last step is where the implementation diverged;
+  `spec_allowed` lists what the spec permitted there. Fix the **code**.
+- For a picture, run `mix outlaw.graph <Name> --format mermaid --trace failure`.
+- Re-run with the reported `--seed` to reproduce.

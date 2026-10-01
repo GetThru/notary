@@ -1,0 +1,5 @@
+\* TLC model for <%= @name %>. Keep constants small.
+CONSTANT Max = 3
+INIT Init
+NEXT Next
+INVARIANT TypeOK

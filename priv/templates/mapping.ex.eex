@@ -1,0 +1,39 @@
+defmodule <%= @module %> do
+  @moduledoc """
+  Conformance mapping between <%= @spec_path %> and the implementation.
+
+  Written by the implementer (human or LLM) and reviewed by the spec author.
+  See `Outlaw.Conformance` for the callbacks.
+  """
+  use Outlaw.Conformance, spec: "<%= @spec_path %>"
+
+  @impl true
+  def init do
+    # Start the system under test; the returned value is the context passed
+    # to action/3 and project/1.
+    raise "implement init/0 for <%= @name %>"
+  end
+
+  @impl true
+  def actions do
+    # One entry per spec action: name => StreamData generator of params.
+    %{
+      "Increment" => StreamData.constant(%{}),
+      "Reset" => StreamData.constant(%{})
+    }
+  end
+
+  @impl true
+  def action(_name, _params, _ctx) do
+    # Call the implementation. Return {:ok, ctx} if it performed the action,
+    # or {:rejected, reason, ctx} if it refused (state must be unchanged).
+    raise "implement action/3 for <%= @name %>"
+  end
+
+  @impl true
+  def project(_ctx) do
+    # Map the implementation's state onto the spec's variables, e.g.
+    # %{"count" => 0}. Use model/1 and set/1 for model values and sets.
+    raise "implement project/1 for <%= @name %>"
+  end
+end

@@ -1,0 +1,9 @@
+defmodule <%= @module %>Test do
+  use ExUnit.Case, async: false
+
+  @moduletag :outlaw
+
+  test "<%= @name %> conforms to its TLA+ spec" do
+    Outlaw.Conformance.assert_conforms(<%= @module %>)
+  end
+end
