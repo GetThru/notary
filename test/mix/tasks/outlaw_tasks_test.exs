@@ -116,6 +116,17 @@ defmodule Mix.Tasks.OutlawTasksTest do
     assert out =~ "do not edit specs"
   end
 
+  test "outlaw.lock --json writes report.json alongside stdout", %{work: work} do
+    {out, 0} = run_task("outlaw.lock", ["--json"])
+    json = last_json(out)
+    assert %{"status" => "pass", "locked" => locked} = json
+    assert is_list(locked)
+
+    report_path = Path.join(work, "report.json")
+    assert File.exists?(report_path)
+    assert JSON.decode!(File.read!(report_path)) == json
+  end
+
   test "assert_conforms passes for correct mappings and raises a readable report for buggy ones" do
     assert Outlaw.Conformance.assert_conforms(Outlaw.Fixtures.CounterSpec, max_runs: 30) == :ok
 

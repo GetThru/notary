@@ -60,13 +60,22 @@ defmodule Outlaw.CLI do
 
   def conformance_opts(opts), do: Keyword.take(opts, [:seed, :max_runs, :max_steps, :force])
 
+  @doc """
+  Encodes `map` as JSON, writes it to `<work_dir>/report.json`, and prints it
+  as the last line of stdout. Shared by every mix task's `--json` output so
+  the report file is always kept in sync with stdout.
+  """
+  def emit_json(map) do
+    json = JSON.encode!(map)
+    path = Path.join(Config.work_dir(), "report.json")
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, json)
+    IO.puts(json)
+  end
+
   def finish(report, opts) do
     if opts[:json] do
-      json = JSON.encode!(Report.to_json(report))
-      path = Path.join(Config.work_dir(), "report.json")
-      File.mkdir_p!(Path.dirname(path))
-      File.write!(path, json)
-      IO.puts(json)
+      emit_json(Report.to_json(report))
     else
       IO.puts(Report.format(report))
     end

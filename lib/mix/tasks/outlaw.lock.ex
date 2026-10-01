@@ -18,7 +18,7 @@ defmodule Mix.Tasks.Outlaw.Lock do
     {:ok, files} = Lock.write(dir)
 
     if opts[:json] do
-      IO.puts(JSON.encode!(%{"status" => "pass", "locked" => files}))
+      CLI.emit_json(%{"status" => "pass", "locked" => files})
     else
       Mix.shell().info(
         "Locked #{length(files)} spec files in #{Path.relative_to_cwd(Lock.path(dir))}:\n" <>
