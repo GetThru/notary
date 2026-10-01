@@ -1,0 +1,13 @@
+/_build/
+/deps/
+/cover/
+/doc/
+/.direnv/
+erl_crash.dump
+*.ez
+states/
+/e2e/sample_app/_build/
+/e2e/sample_app/deps/
+/.nix-mix/
+/.nix-hex/
+/.superpowers/
