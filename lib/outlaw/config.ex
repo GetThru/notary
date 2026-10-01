@@ -28,13 +28,22 @@ defmodule Outlaw.Config do
   @spec work_dir() :: String.t()
   def work_dir do
     case get(:work_dir) do
-      nil -> Path.expand("../outlaw", Mix.Project.build_path())
+      nil -> default_work_dir()
       dir -> Path.expand(dir)
     end
   end
 
+  @doc """
+  Path to the pinned TLA+ tools jar. Defaults to `tla2tools.jar` inside the
+  *default* work dir (`_build/outlaw`), not the possibly-overridden `work_dir/0` —
+  overriding `config :outlaw, work_dir:` only relocates generated artifacts (cache,
+  reports, HTML), not the installed jar. Override the jar location independently
+  with `config :outlaw, tla2tools_path:`.
+  """
   @spec jar_path() :: String.t()
-  def jar_path, do: get(:tla2tools_path) || Path.join(work_dir(), "tla2tools.jar")
+  def jar_path, do: get(:tla2tools_path) || Path.join(default_work_dir(), "tla2tools.jar")
+
+  defp default_work_dir, do: Path.expand("../outlaw", Mix.Project.build_path())
 
   @spec specs_dir() :: String.t()
   def specs_dir, do: Path.expand(get(:specs_dir))

@@ -25,19 +25,8 @@ defmodule Outlaw.TLCTest do
     @describetag :tmp_dir
 
     setup %{tmp_dir: dir} do
-      # Config.jar_path/0 defaults to "<work_dir>/tla2tools.jar" (see config_test.exs),
-      # so overriding :work_dir alone would make the already-installed jar
-      # undiscoverable. Pin :tla2tools_path to the jar that `mix run -e
-      # 'Outlaw.Tools.install()'` (Step 5) already installed before redirecting
-      # :work_dir to a disposable tmp dir for metadir/cache isolation.
-      jar = Outlaw.Config.jar_path()
-      Application.put_env(:outlaw, :tla2tools_path, jar)
       Application.put_env(:outlaw, :work_dir, Path.join(dir, "work"))
-
-      on_exit(fn ->
-        Application.delete_env(:outlaw, :work_dir)
-        Application.delete_env(:outlaw, :tla2tools_path)
-      end)
+      on_exit(fn -> Application.delete_env(:outlaw, :work_dir) end)
     end
 
     test "check passes for a correct spec" do

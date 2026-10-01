@@ -37,6 +37,13 @@ defmodule Outlaw.ConfigTest do
     assert Config.jar_path() == "/opt/tla2tools.jar"
   end
 
+  test "overriding only work_dir does not move the default jar location" do
+    default_jar = Config.jar_path()
+    Application.put_env(:outlaw, :work_dir, "/tmp/outlaw-x")
+    assert Config.work_dir() == "/tmp/outlaw-x"
+    assert Config.jar_path() == default_jar
+  end
+
   test "pinned tools metadata" do
     assert Config.tla_version() == "1.7.4"
     assert Config.jar_url() =~ "v1.7.4/tla2tools.jar"
