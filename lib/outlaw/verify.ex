@@ -51,9 +51,15 @@ defmodule Outlaw.Verify do
 
       {:ok, module} ->
         case Conformance.check(module, graph, Keyword.take(opts, @conformance_opts)) do
-          {:ok, summary} -> stage(:conformance, :pass, {:ok, summary})
-          {:error, %Failure{} = failure} -> stage(:conformance, :fail, {:error, failure})
-          {:error, %Error{} = error} -> stage(:conformance, :error, {:error, error})
+          {:ok, summary} ->
+            stage(:conformance, :pass, {:ok, summary})
+
+          {:error, %Failure{} = failure} ->
+            Outlaw.Viewer.write_failure(spec.name, graph, failure)
+            stage(:conformance, :fail, {:error, failure})
+
+          {:error, %Error{} = error} ->
+            stage(:conformance, :error, {:error, error})
         end
     end
   end
