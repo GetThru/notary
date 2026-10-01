@@ -17,6 +17,8 @@ defmodule Outlaw.MixProject do
     ]
   end
 
+  def cli, do: [preferred_envs: ["outlaw.test": :test, "outlaw.verify": :test]]
+
   def application do
     [extra_applications: [:logger, :eex, :mix, :inets, :ssl, :public_key, :crypto]]
   end
