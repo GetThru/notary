@@ -10,7 +10,8 @@ defmodule Outlaw.ConformanceTest do
                spec_path: "test/fixtures/specs/Bank.tla",
                observe: ["balance"],
                discover: true,
-               internal: []
+               internal: [],
+               generation: :walk
              }
 
     assert Conformance.spec(Fixtures.BankSpec).name == "Bank"
@@ -21,8 +22,29 @@ defmodule Outlaw.ConformanceTest do
              spec_path: "test/fixtures/specs/Async.tla",
              observe: nil,
              discover: true,
-             internal: ["Complete"]
+             internal: ["Complete"],
+             generation: :walk
            }
+  end
+
+  test "__outlaw__/0 records generation: :uniform when requested" do
+    assert Fixtures.CounterUniformSpec.__outlaw__().generation == :uniform
+  end
+
+  test "a generation: :uniform mapping passes a check" do
+    assert {:ok, %{runs: 50, seed: 42}} =
+             Conformance.check(Fixtures.CounterUniformSpec, Fixtures.graph("Counter"),
+               seed: 42,
+               max_runs: 50
+             )
+  end
+
+  test "validate rejects a generation: other than :walk or :uniform" do
+    assert {:error, %Outlaw.Error{kind: :invalid_mapping, message: msg}} =
+             Conformance.validate(Fixtures.CounterBadGenerationSpec, Fixtures.graph("Counter"))
+
+    assert msg =~ "generation:"
+    assert msg =~ ":nope"
   end
 
   test "observed vars default to all spec variables" do

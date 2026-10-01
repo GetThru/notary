@@ -207,3 +207,32 @@ defmodule Outlaw.Fixtures.CounterUnknownActionSpec do
   def action(_, _, pid), do: {:ok, pid}
   def project(pid), do: %{"x" => Agent.get(pid, & &1)}
 end
+
+defmodule Outlaw.Fixtures.CounterUniformSpec do
+  @moduledoc false
+  # Same as CounterSpec, but keeps the Phase 1 uniform generator.
+  use Outlaw.Conformance,
+    spec: "test/fixtures/specs/Counter.tla",
+    generation: :uniform,
+    discover: false
+
+  defdelegate init(), to: Outlaw.Fixtures.CounterSpec
+  defdelegate actions(), to: Outlaw.Fixtures.CounterSpec
+  defdelegate action(name, params, pid), to: Outlaw.Fixtures.CounterSpec
+  defdelegate project(pid), to: Outlaw.Fixtures.CounterSpec
+  defdelegate teardown(pid), to: Outlaw.Fixtures.CounterSpec
+end
+
+defmodule Outlaw.Fixtures.CounterBadGenerationSpec do
+  @moduledoc false
+  # Invalid mapping: generation: must be :walk or :uniform.
+  use Outlaw.Conformance,
+    spec: "test/fixtures/specs/Counter.tla",
+    generation: :nope,
+    discover: false
+
+  defdelegate init(), to: Outlaw.Fixtures.CounterSpec
+  defdelegate actions(), to: Outlaw.Fixtures.CounterSpec
+  defdelegate action(name, params, pid), to: Outlaw.Fixtures.CounterSpec
+  defdelegate project(pid), to: Outlaw.Fixtures.CounterSpec
+end

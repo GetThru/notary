@@ -62,6 +62,72 @@ defmodule Outlaw.Conformance.RunnerTest do
     end
   end
 
+  describe "mid-run :settle points (Runner.run/8 with explicit sequences)" do
+    @request {"Request", %{}}
+
+    test "a successful mid-run settle records a (settle) step and the run continues" do
+      assert {:ok, steps} =
+               Runner.run(
+                 Fixtures.AsyncSpec,
+                 Fixtures.graph("Async"),
+                 ["status"],
+                 ["Complete"],
+                 MapSet.new(["Complete"]),
+                 [@request, :settle, @request],
+                 5_000,
+                 1_000
+               )
+
+      # init, Request, mid-run (settle), Request, end-of-run (settle)
+      assert Enum.map(steps, & &1.action) == [nil, "Request", "(settle)", "Request", "(settle)"]
+      assert Enum.map(steps, & &1.index) == [0, 1, 2, 3, 4]
+
+      mid = Enum.at(steps, 2)
+      assert mid.params == nil
+      assert mid.outcome == :ok
+      assert mid.projection == %{"status" => "done"}
+      assert mid.candidates != []
+    end
+
+    test "a mid-run settle that stalls fails at the (settle) step" do
+      assert {:error, %Failure{kind: :internal_action_stalled, steps: steps, details: details}} =
+               Runner.run(
+                 Fixtures.AsyncStalledSpec,
+                 Fixtures.graph("Async"),
+                 ["status"],
+                 ["Complete"],
+                 MapSet.new(["Complete"]),
+                 [@request, :settle, @request],
+                 5_000,
+                 50
+               )
+
+      last = List.last(steps)
+      assert last.action == "(settle)"
+      assert last.index == 2
+      assert length(steps) == 3
+      assert details.pending == ["Complete"]
+      assert details.during == "settle"
+    end
+
+    test ":settle is a no-op when no fair internal action is declared" do
+      assert {:ok, steps} =
+               Runner.run(
+                 Fixtures.CounterSpec,
+                 Fixtures.graph("Counter"),
+                 ["x"],
+                 [],
+                 MapSet.new(),
+                 [{"Inc", %{}}, :settle, {"Inc", %{}}],
+                 5_000,
+                 1_000
+               )
+
+      assert Enum.map(steps, & &1.action) == [nil, "Inc", "Inc"]
+      assert Enum.map(steps, & &1.index) == [0, 1, 2]
+    end
+  end
+
   describe "settle edge cases (unit-level, synthetic graphs)" do
     defmodule FlipMapping do
       @moduledoc false

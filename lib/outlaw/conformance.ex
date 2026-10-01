@@ -29,6 +29,13 @@ defmodule Outlaw.Conformance do
       fair is never required to fire. Each name must be an action in the
       spec's state graph and must not also appear as a key of `actions/0`
       (validated, `:invalid_mapping`). See the Outlaw design spec §4.3/§5.
+      With fair internal actions declared, the generator may also place
+      `:settle` points mid-run, where the runner settles the same way before
+      continuing.
+    * `:generation`: `:walk` (default) generates sequences by walking the
+      spec's state graph (`Outlaw.Conformance.Walk`, design spec §5.1);
+      `:uniform` keeps the Phase 1 generator (uniform picks from `actions/0`,
+      no `:settle` points). Anything else fails validation (`:invalid_mapping`).
 
   `project/1` must return values in the `Outlaw.Value` representation; `model/1`
   and `set/1` are imported. Prefer unnamed processes (or stop them in
@@ -51,6 +58,7 @@ defmodule Outlaw.Conformance do
     observe = Keyword.get(opts, :observe)
     discover = Keyword.get(opts, :discover, true)
     internal = Keyword.get(opts, :internal, [])
+    generation = Keyword.get(opts, :generation, :walk)
 
     quote do
       @behaviour Outlaw.Conformance
@@ -62,7 +70,8 @@ defmodule Outlaw.Conformance do
           spec_path: unquote(spec),
           observe: unquote(observe),
           discover: unquote(discover),
-          internal: unquote(internal)
+          internal: unquote(internal),
+          generation: unquote(generation)
         }
     end
   end
@@ -82,6 +91,7 @@ defmodule Outlaw.Conformance do
     unknown_vars = Enum.reject(observed_vars(module, graph), &(&1 in graph.variables))
     unknown_internal = Enum.reject(internal, &MapSet.member?(graph.actions, &1))
     internal_in_actions = Enum.filter(internal, &(&1 in actions))
+    generation = Map.get(module.__outlaw__(), :generation, :walk)
 
     problems =
       [
@@ -95,7 +105,9 @@ defmodule Outlaw.Conformance do
           "internal: lists actions that never occur in the spec's state graph: #{Enum.join(unknown_internal, ", ")}. " <>
             "Known actions: #{graph.actions |> Enum.sort() |> Enum.join(", ")}.",
         internal_in_actions != [] &&
-          "internal: #{Enum.join(internal_in_actions, ", ")} must not also be a key of actions/0 (internal actions are never driven by the runner; see Outlaw.Conformance's :internal option)."
+          "internal: #{Enum.join(internal_in_actions, ", ")} must not also be a key of actions/0 (internal actions are never driven by the runner; see Outlaw.Conformance's :internal option).",
+        generation not in [:walk, :uniform] &&
+          "generation: must be :walk (the default, spec-guided) or :uniform, got: #{inspect(generation)}."
       ]
       |> Enum.filter(&is_binary/1)
 

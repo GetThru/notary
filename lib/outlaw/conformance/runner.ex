@@ -7,7 +7,7 @@ defmodule Outlaw.Conformance.Runner do
   """
 
   alias Outlaw.{Config, StateGraph, Value}
-  alias Outlaw.Conformance.{Failure, Step}
+  alias Outlaw.Conformance.{Failure, Step, Walk}
 
   @spec check(module(), StateGraph.t(), [String.t()], keyword()) ::
           {:ok, %{runs: non_neg_integer(), seed: integer()}} | {:error, Failure.t()}
@@ -19,8 +19,9 @@ defmodule Outlaw.Conformance.Runner do
     settle_timeout = Keyword.get(opts, :settle_timeout, Config.get(:settle_timeout))
     internal = Map.get(module.__outlaw__(), :internal, [])
     fair = Keyword.get(opts, :fair, MapSet.new())
+    generation = Map.get(module.__outlaw__(), :generation, :walk)
 
-    generator = steps_generator(module.actions(), max_steps)
+    generator = generator(generation, module, graph, internal, fair, max_steps)
     options = [initial_seed: {0, 0, seed}, max_runs: max_runs, max_shrinking_steps: 500]
 
     result =
@@ -35,6 +36,19 @@ defmodule Outlaw.Conformance.Runner do
       {:ok, _} -> {:ok, %{runs: max_runs, seed: seed}}
       {:error, %{shrunk_failure: failure}} -> {:error, %{failure | seed: seed}}
     end
+  end
+
+  # Design spec §5 step 3 / §5.1: spec-guided by default; `generation:
+  # :uniform` keeps the Phase 1 generator exactly (no `:settle` points).
+  defp generator(:uniform, module, _graph, _internal, _fair, max_steps),
+    do: steps_generator(module.actions(), max_steps)
+
+  defp generator(:walk, module, graph, internal, fair, max_steps) do
+    Walk.generator(graph, module.actions(),
+      internal: internal,
+      fair: MapSet.new(Enum.filter(internal, &MapSet.member?(fair, &1))),
+      max_steps: max_steps
+    )
   end
 
   @spec steps_generator(%{String.t() => StreamData.t(map())}, non_neg_integer()) ::
@@ -53,7 +67,7 @@ defmodule Outlaw.Conformance.Runner do
           [String.t()],
           [String.t()],
           MapSet.t(String.t()),
-          [{String.t(), map()}],
+          [{String.t(), map()} | :settle],
           timeout(),
           timeout()
         ) :: {:ok, [Step.t()]} | {:error, Failure.t()}
@@ -177,10 +191,20 @@ defmodule Outlaw.Conformance.Runner do
   end
 
   defp execute(m, graph, observe, internal, fair_internal, steps, notify, settle_timeout) do
+    w = %{
+      m: m,
+      graph: graph,
+      observe: observe,
+      internal: internal,
+      fair: fair_internal,
+      notify: notify,
+      settle_timeout: settle_timeout
+    }
+
     ctx = init_ctx(m, notify)
     p0 = project(m, ctx, observe, notify)
     initial = StateGraph.initial_states(graph)
-    closed_initial = closure(graph, initial, internal)
+    closed_initial = Walk.closure(graph, initial, internal)
     allowed = closed_initial |> Enum.map(&observed(graph, &1, observe)) |> Enum.uniq()
     candidates = Enum.filter(closed_initial, &(observed(graph, &1, observe) == p0))
 
@@ -193,25 +217,14 @@ defmodule Outlaw.Conformance.Runner do
       if candidates == [] do
         {{:fail, :init_mismatch, %{}}, ctx}
       else
-        {res, ctx2, next_i, candidates_at_end} =
-          walk(m, graph, observe, internal, steps, 1, ctx, candidates, notify)
+        case walk(w, steps, 1, ctx, candidates) do
+          {:ok, ctx2, next_i, candidates_at_end} when internal != [] ->
+            # End-of-run settle (§5 step 4), the same function as a mid-run
+            # `:settle` point.
+            with {:ok, ctx3, _settled} <- settle(w, ctx2, next_i, candidates_at_end),
+                 do: {:ok, ctx3}
 
-        case res do
-          :ok when internal != [] ->
-            settle(
-              m,
-              graph,
-              observe,
-              internal,
-              fair_internal,
-              ctx2,
-              next_i,
-              candidates_at_end,
-              notify,
-              settle_timeout
-            )
-
-          _ ->
+          {res, ctx2, _i, _candidates} ->
             {res, ctx2}
         end
       end
@@ -249,17 +262,29 @@ defmodule Outlaw.Conformance.Runner do
     end
   end
 
-  defp walk(_m, _graph, _observe, _internal, [], i, ctx, candidates, _notify),
-    do: {:ok, ctx, i, candidates}
+  defp walk(_w, [], i, ctx, candidates), do: {:ok, ctx, i, candidates}
 
-  defp walk(m, graph, observe, internal, [{name, params} | rest], i, ctx, candidates, notify) do
-    closed = closure(graph, candidates, internal)
+  # A mid-run `:settle` point (design spec §5 step 3): with no fair internal
+  # action declared it is a no-op -- no step recorded, index not advanced.
+  defp walk(%{fair: []} = w, [:settle | rest], i, ctx, candidates),
+    do: walk(w, rest, i, ctx, candidates)
+
+  defp walk(w, [:settle | rest], i, ctx, candidates) do
+    case settle(w, ctx, i, candidates) do
+      {:ok, ctx, settled} -> walk(w, rest, i + 1, ctx, settled)
+      {fail, ctx} -> {fail, ctx, i, []}
+    end
+  end
+
+  defp walk(w, [{name, params} | rest], i, ctx, candidates) do
+    %{m: m, graph: graph, observe: observe, internal: internal, notify: notify} = w
+    closed = Walk.closure(graph, candidates, internal)
     succ = closed |> Enum.flat_map(&StateGraph.successors(graph, &1, name)) |> Enum.uniq()
 
     case call(notify, "action/3 #{name} #{inspect(params)}", fn -> m.action(name, params, ctx) end) do
       {:ok, ctx} ->
         p2 = project(m, ctx, observe, notify)
-        closed_succ = closure(graph, succ, internal)
+        closed_succ = Walk.closure(graph, succ, internal)
         allowed = closed_succ |> Enum.map(&observed(graph, &1, observe)) |> Enum.uniq()
         next = Enum.filter(closed_succ, &(observed(graph, &1, observe) == p2))
 
@@ -279,7 +304,7 @@ defmodule Outlaw.Conformance.Runner do
         cond do
           succ == [] -> {{:fail, :action_not_enabled, %{}}, ctx, i, []}
           next == [] -> {{:fail, :illegal_transition, %{}}, ctx, i, []}
-          true -> walk(m, graph, observe, internal, rest, i + 1, ctx, next, notify)
+          true -> walk(w, rest, i + 1, ctx, next)
         end
 
       {:rejected, reason, ctx} ->
@@ -302,7 +327,7 @@ defmodule Outlaw.Conformance.Runner do
 
         if next == [],
           do: {{:fail, :rejected_with_side_effect, %{}}, ctx, i, []},
-          else: walk(m, graph, observe, internal, rest, i + 1, ctx, next, notify)
+          else: walk(w, rest, i + 1, ctx, next)
 
       other ->
         throw({:outlaw_fail, :invalid_action_result, %{got: inspect(other)}})
@@ -356,26 +381,8 @@ defmodule Outlaw.Conformance.Runner do
 
   # -- internal actions / settle (Outlaw design spec §4.3, §5) -----------------
 
-  # Every state reachable from `states` through zero or more edges labelled
-  # with an internal action. With no internal actions this is `states` itself
-  # (same list, same order) so behaviour with `internal: []` is byte-for-byte
-  # unchanged from Phase 1.
-  defp closure(_graph, states, []), do: states
-
-  defp closure(graph, states, internal) do
-    states |> MapSet.new() |> closure_fixpoint(graph, internal) |> MapSet.to_list()
-  end
-
-  defp closure_fixpoint(set, graph, internal) do
-    grown =
-      Enum.reduce(internal, set, fn name, acc ->
-        Enum.reduce(set, acc, fn s, acc2 ->
-          graph |> StateGraph.successors(s, name) |> Enum.reduce(acc2, &MapSet.put(&2, &1))
-        end)
-      end)
-
-    if MapSet.equal?(grown, set), do: set, else: closure_fixpoint(grown, graph, internal)
-  end
+  # `closure` (every state reachable through internal-action edges) is
+  # `Walk.closure/3` -- one implementation shared with the generator.
 
   # An internal action is "enabled" at a state for settling purposes if it has
   # at least one successor other than the state itself: a pure self-loop can't
@@ -393,47 +400,29 @@ defmodule Outlaw.Conformance.Runner do
   defp pending_internal(graph, states, fair),
     do: Enum.filter(fair, fn name -> Enum.any?(states, &internal_enabled?(graph, &1, name)) end)
 
-  # Re-projects every 10ms until the implementation reaches a candidate state
-  # with no *fair* internal action enabled (weak/strong fairness, bounded at
-  # runtime), or fails: `:illegal_transition` if the projection leaves
-  # closure(candidates) entirely -- checked even when no internal action is
-  # fair -- or `:internal_action_stalled` if settle_timeout elapses first.
-  # `closure` itself (via `internal`) always considers every declared
-  # internal action, fair or not; only the quiescence check is narrowed to
-  # `fair`.
-  defp settle(m, graph, observe, internal, fair, ctx, index, candidates, notify, settle_timeout) do
-    deadline = System.monotonic_time(:millisecond) + settle_timeout
-
-    settle_loop(
-      m,
-      graph,
-      observe,
-      internal,
-      fair,
-      ctx,
-      index,
-      candidates,
-      notify,
-      deadline,
-      settle_timeout
-    )
+  # Settles at step `index`, both at the end of a run and at a mid-run
+  # `:settle` point (one implementation for both). Re-projects every 10ms
+  # until the implementation reaches a candidate state with no *fair*
+  # internal action enabled (weak/strong fairness, bounded at runtime) --
+  # `{:ok, ctx, candidates}`, the candidates matching the settled projection
+  # (also recorded on the `(settle)` step) -- or fails with `{fail, ctx}`:
+  # `:illegal_transition` if the projection leaves closure(candidates)
+  # entirely -- checked even when no internal action is fair -- or
+  # `:internal_action_stalled` if settle_timeout elapses first. `closure`
+  # itself (via `internal`) always considers every declared internal action,
+  # fair or not; only the quiescence check is narrowed to `fair`. Records
+  # exactly one `(settle)` step either way; failure details carry
+  # `during: "settle"` explicitly, since recording that step clears the
+  # in-flight `during` label in `await/3`.
+  defp settle(w, ctx, index, candidates) do
+    deadline = System.monotonic_time(:millisecond) + w.settle_timeout
+    settle_loop(w, ctx, index, candidates, deadline)
   end
 
-  defp settle_loop(
-         m,
-         graph,
-         observe,
-         internal,
-         fair,
-         ctx,
-         index,
-         candidates,
-         notify,
-         deadline,
-         settle_timeout
-       ) do
+  defp settle_loop(w, ctx, index, candidates, deadline) do
+    %{m: m, graph: graph, observe: observe, internal: internal, fair: fair, notify: notify} = w
     p_now = project(m, ctx, observe, notify, "settle")
-    closed = closure(graph, candidates, internal)
+    closed = Walk.closure(graph, candidates, internal)
     allowed = closed |> Enum.map(&observed(graph, &1, observe)) |> Enum.uniq()
     c_now = Enum.filter(closed, &(observed(graph, &1, observe) == p_now))
 
@@ -450,35 +439,22 @@ defmodule Outlaw.Conformance.Runner do
     cond do
       c_now == [] ->
         notify.({:step, step})
-        {{:fail, :illegal_transition, %{}}, ctx}
+        {{:fail, :illegal_transition, %{during: "settle"}}, ctx}
 
       Enum.any?(c_now, &settled_state?(graph, &1, fair)) ->
         notify.({:step, step})
-        {:ok, ctx}
+        {:ok, ctx, c_now}
 
       System.monotonic_time(:millisecond) >= deadline ->
         notify.({:step, step})
         pending = pending_internal(graph, c_now, fair)
 
-        {{:fail, :internal_action_stalled, %{pending: pending, settle_timeout: settle_timeout}},
-         ctx}
+        {{:fail, :internal_action_stalled,
+          %{pending: pending, settle_timeout: w.settle_timeout, during: "settle"}}, ctx}
 
       true ->
         Process.sleep(10)
-
-        settle_loop(
-          m,
-          graph,
-          observe,
-          internal,
-          fair,
-          ctx,
-          index,
-          c_now,
-          notify,
-          deadline,
-          settle_timeout
-        )
+        settle_loop(w, ctx, index, c_now, deadline)
     end
   end
 end
