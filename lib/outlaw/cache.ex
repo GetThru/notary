@@ -35,10 +35,19 @@ defmodule Outlaw.Cache do
   def put(key, value) do
     target = path(key)
     File.mkdir_p!(Path.dirname(target))
-    [name | _] = String.split(key, "-")
 
-    for old <- Path.wildcard(Path.join(Path.dirname(target), "#{name}-*.graph")), old != target do
-      File.rm(old)
+    # Extract spec name by removing the trailing "-<16 hex>" suffix
+    name = String.slice(key, 0..-18//1)
+    pattern = ~r/^#{Regex.escape(name)}-[0-9a-f]{16}\.graph$/
+
+    dir = Path.dirname(target)
+
+    for old <- File.ls!(dir) || [] do
+      old_path = Path.join(dir, old)
+
+      if String.match?(old, pattern) && old_path != target do
+        File.rm(old_path)
+      end
     end
 
     tmp = target <> ".tmp#{System.unique_integer([:positive])}"

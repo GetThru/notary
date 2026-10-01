@@ -39,4 +39,26 @@ defmodule Outlaw.CacheTest do
     File.write!(Cache.path(key), "not a term")
     assert Cache.get(key) == :miss
   end
+
+  test "specs with hyphens in name don't collide on cleanup", %{tmp_dir: _dir} do
+    # Put entries for "My" and "My-Spec" specs with same first hash digits
+    my_key = "My-0123456789abcdef"
+    my_spec_key = "My-Spec-0123456789abcdef"
+
+    Cache.put(my_key, :my_entry)
+    Cache.put(my_spec_key, :my_spec_entry)
+
+    # Verify both are cached
+    assert Cache.get(my_key) == {:ok, :my_entry}
+    assert Cache.get(my_spec_key) == {:ok, :my_spec_entry}
+
+    # Put a new version of "My-Spec" with different hash
+    new_my_spec_key = "My-Spec-fedcba9876543210"
+    Cache.put(new_my_spec_key, :my_spec_new)
+
+    # Old "My-Spec" entry should be deleted, "My" entry should remain
+    assert Cache.get(my_key) == {:ok, :my_entry}
+    assert Cache.get(my_spec_key) == :miss
+    assert Cache.get(new_my_spec_key) == {:ok, :my_spec_new}
+  end
 end
