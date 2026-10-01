@@ -164,6 +164,27 @@ defmodule Outlaw.ReportTest do
     refute text =~ "(settle) nil"
   end
 
+  test "a failure's minimized detail renders in text and JSON" do
+    failure = %{
+      @failure
+      | details: %{minimized: "6 replays, 4 items removed, 1 params reduced"}
+    }
+
+    text = Report.format_failure("Bank", failure)
+    assert text =~ "\nminimized: 6 replays, 4 items removed, 1 params reduced\n"
+
+    json =
+      report([%{stage: :conformance, status: :fail, payload: {:error, failure}}])
+      |> Report.to_json()
+      |> JSON.encode!()
+      |> JSON.decode!()
+
+    [conf] = hd(json["specs"])["stages"]
+
+    assert conf["failure"]["details"]["minimized"] ==
+             "6 replays, 4 items removed, 1 params reduced"
+  end
+
   test "format_violation shows the counterexample" do
     text = Report.format_violation("Inv", @violation)
     assert text =~ "TLC found a violation in Inv: Invariant Small is violated. (invariant)"

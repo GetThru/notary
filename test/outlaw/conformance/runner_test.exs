@@ -169,6 +169,67 @@ defmodule Outlaw.Conformance.RunnerTest do
       assert stats.params == 1
     end
 
+    # Items: setup "S", noise "N", trigger "X". Without X the run passes;
+    # without S, `missing_setup` is what the replay returns instead.
+    defp setup_replay(missing_setup) do
+      fn items ->
+        cond do
+          {"X", %{}} not in items -> {:ok, []}
+          {"S", %{}} not in items -> {:error, Failure.new(missing_setup, [], %{items: items})}
+          true -> {:error, Failure.new(:illegal_transition, [], %{items: items})}
+        end
+      end
+    end
+
+    @setup_items [{"S", %{}}, {"N", %{}}, {"X", %{}}]
+
+    for kind <- [:timeout, :exception, :crashed, :internal_action_stalled] do
+      test "a candidate failing with #{kind} instead of a spec-level kind is rejected" do
+        replay = setup_replay(unquote(kind))
+        {:error, failure} = replay.(@setup_items)
+
+        assert {[{"S", %{}}, {"X", %{}}], %Failure{kind: :illegal_transition}, _} =
+                 Runner.minimize(@setup_items, failure, replay, seed: 1)
+      end
+    end
+
+    test "a candidate failing with a different spec-level kind is kept" do
+      replay = setup_replay(:action_not_enabled)
+      {:error, failure} = replay.(@setup_items)
+
+      assert {[{"X", %{}}], %Failure{kind: :action_not_enabled}, _} =
+               Runner.minimize(@setup_items, failure, replay, seed: 1)
+    end
+
+    test "a non-spec-level original kind only accepts the same kind" do
+      replay = fn items ->
+        cond do
+          {"X", %{}} not in items -> {:ok, []}
+          {"S", %{}} not in items -> {:error, Failure.new(:illegal_transition, [], %{})}
+          true -> {:error, Failure.new(:exception, [], %{})}
+        end
+      end
+
+      {:error, failure} = replay.(@setup_items)
+
+      assert {[{"S", %{}}, {"X", %{}}], %Failure{kind: :exception}, _} =
+               Runner.minimize(@setup_items, failure, replay, seed: 1)
+    end
+
+    test "Conformance.check reports details.minimized with the seed unchanged" do
+      assert {:error, %Failure{seed: 42, details: %{minimized: minimized}}} =
+               check(Fixtures.BankOverdraftSpec, "Bank")
+
+      assert minimized =~ ~r/^\d+ replays, \d+ items removed, \d+ params reduced$/
+    end
+
+    test "Runner.check passes :max_replays through to the minimization" do
+      assert {:error, %Failure{seed: 42, details: %{minimized: minimized}}} =
+               check(Fixtures.WorkflowIgnoresGatewaySpec, "Workflow", max_replays: 0)
+
+      assert minimized == "0 replays, 0 items removed, 0 params reduced"
+    end
+
     test "total replays are capped by :max_replays" do
       replay = fake_replay(&({"X", %{}} in &1))
       items = List.duplicate({"N", %{}}, 40) ++ [{"X", %{}}]

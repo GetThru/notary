@@ -301,10 +301,15 @@ generator: uniform picks from `actions/0`, no `:settle` points).
   both generation modes): repeated rounds of deletion (contiguous chunks --
   halves, quarters, ... -- then single items, front to back) and params
   reduction (for each step, values from that action's own `actions/0`
-  generator that are smaller in Erlang term order, smallest first), keeping
-  each change whose replay still fails -- with any failure kind, as in
-  StreamData's own shrinking -- until a round changes nothing, capped at 200
-  replays in total (each can cost up to `settle_timeout`). The reported
+  generator that are smaller in Erlang term order -- a structural order, not
+  a domain-specific "simpler" -- smallest first), keeping each change whose
+  replay still shows the same defect: it fails with the original failure's
+  kind, or both kinds are spec-level (`:init_mismatch`, `:illegal_transition`,
+  `:action_not_enabled`, `:rejected_with_side_effect`), so a spec violation is
+  never traded for a timeout, crash, exception or stall. Rounds repeat until
+  one changes nothing, capped at `:max_replays` (default 200) replays in total;
+  each replay can cost up to `action_timeout` per step plus `settle_timeout`
+  per settle point. The reported
   failure is the last failing replay's; its details record the pass
   (`minimized: N replays, K items removed, P params reduced`); the seed is
   unchanged.

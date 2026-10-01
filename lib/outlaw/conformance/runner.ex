@@ -9,6 +9,14 @@ defmodule Outlaw.Conformance.Runner do
   alias Outlaw.{Config, StateGraph, Value}
   alias Outlaw.Conformance.{Failure, Step, Walk}
 
+  @default_max_replays 200
+  @spec_level_kinds [
+    :init_mismatch,
+    :illegal_transition,
+    :action_not_enabled,
+    :rejected_with_side_effect
+  ]
+
   @spec check(module(), StateGraph.t(), [String.t()], keyword()) ::
           {:ok, %{runs: non_neg_integer(), seed: integer()}} | {:error, Failure.t()}
   def check(module, graph, observe, opts) do
@@ -40,7 +48,11 @@ defmodule Outlaw.Conformance.Runner do
         replay = &run(module, graph, observe, internal, fair, &1, timeout, settle_timeout)
 
         {_items, failure, stats} =
-          minimize(items, failure, replay, seed: seed, actions: module.actions())
+          minimize(items, failure, replay,
+            seed: seed,
+            actions: module.actions(),
+            max_replays: Keyword.get(opts, :max_replays, @default_max_replays)
+          )
 
         details = Map.put(failure.details, :minimized, format_stats(stats))
         {:error, %{failure | seed: seed, details: details}}
@@ -52,8 +64,6 @@ defmodule Outlaw.Conformance.Runner do
 
   # -- post-shrink minimization (Outlaw design spec §5.1) ----------------------
 
-  @default_max_replays 200
-
   @doc """
   Minimizes a failing item list after StreamData's own shrinking (design spec
   §5.1, "Reproducibility and shrinking"). The spec-guided generator's values
@@ -64,16 +74,21 @@ defmodule Outlaw.Conformance.Runner do
 
   Repeats, until a round changes nothing or the replay budget runs out:
     * deletion: tries removing contiguous chunks (halves, quarters, ... then
-      single items, front to back), keeping a removal whenever `replay`
-      still returns `{:error, _}`;
-    * params: for each `{name, params}` item, tries values from `name`'s
-      params generator in `opts[:actions]` that are smaller (Erlang term
-      order) than the current params, smallest first, keeping the first one
-      that still fails.
+      single items, front to back), keeping a removal whenever the
+      candidate still fails (below);
+    * params: for each `{name, params}` item, tries values drawn from
+      `name`'s params generator in `opts[:actions]` that are smaller than the
+      current params in Erlang term order (a structural order, not a
+      domain-specific "simpler" -- e.g. `%{a: 1} < %{a: 2}`), smallest
+      first, keeping the first one that still fails.
 
-  Any failure counts as "still fails" (as in StreamData's shrinking), so the
-  kind may change along the way (e.g. an `:illegal_transition` that needed a
-  preceding step can become an `:action_not_enabled` without it). Returns
+  A candidate "still fails" only if its replay fails with the original
+  failure's kind, or both kinds are spec-level (`:init_mismatch`,
+  `:illegal_transition`, `:action_not_enabled`,
+  `:rejected_with_side_effect`): e.g. an `:illegal_transition` that needed a
+  preceding step can become an `:action_not_enabled` without it, but a spec
+  violation is never traded for a `:timeout`, `:crashed`, `:exception` or
+  `:internal_action_stalled` (an unrelated or flaky defect). Returns
   the minimized items, the `Failure` from the last failing replay (or the
   given one if nothing was removed or reduced) and
   `%{replays:, removed:, params:}`.
@@ -81,7 +96,8 @@ defmodule Outlaw.Conformance.Runner do
   Options: `:seed` (integer; drives params candidate draws, default 0),
   `:actions` (params generators, default `%{}`: no params pass),
   `:max_replays` (default #{@default_max_replays}; each replay can cost up
-  to `settle_timeout`, so this bounds the pass).
+  to `action_timeout` per step plus `settle_timeout` per settle point, so
+  this bounds the pass; `Runner.check/4` takes it as `:max_replays`).
   """
   @spec minimize(
           [{String.t(), map()} | :settle],
@@ -95,6 +111,7 @@ defmodule Outlaw.Conformance.Runner do
     m = %{
       items: items,
       failure: failure,
+      original_kind: failure.kind,
       replay: replay,
       seed: Keyword.get(opts, :seed, 0),
       actions: Keyword.get(opts, :actions, %{}),
@@ -124,11 +141,26 @@ defmodule Outlaw.Conformance.Runner do
       m = %{m | replays: m.replays + 1}
 
       case m.replay.(candidate) do
-        {:error, failure} -> {:fails, %{m | items: candidate, failure: failure}}
-        _ -> {:passes, m}
+        {:error, failure} ->
+          if same_defect?(m.original_kind, failure.kind),
+            do: {:fails, %{m | items: candidate, failure: failure}},
+            else: {:passes, m}
+
+        _ ->
+          {:passes, m}
       end
     end
   end
+
+  # A replay still shows the same defect if it fails with the original kind,
+  # or if both kinds are spec-level (the implementation diverged from the
+  # spec): e.g. Bank's `:illegal_transition` after a deposit becomes a lone
+  # `:action_not_enabled` withdrawal. A spec violation is never traded for a
+  # timeout, crash, exception or stall (an unrelated or flaky defect).
+  defp same_defect?(kind, kind), do: true
+
+  defp same_defect?(original, kind),
+    do: original in @spec_level_kinds and kind in @spec_level_kinds
 
   defp deletion_pass(m), do: delete_chunks(m, chunk_sizes(length(m.items)))
 
@@ -195,7 +227,7 @@ defmodule Outlaw.Conformance.Runner do
     gen = Map.fetch!(m.actions, name)
 
     for k <- 0..15 do
-      gen |> StreamData.seeded(m.seed * 1_000 + i * 16 + k) |> Enum.at(0)
+      gen |> StreamData.seeded(:erlang.phash2({m.seed, i, k})) |> Enum.at(0)
     end
     |> Enum.uniq()
     |> Enum.filter(&(&1 < params))
