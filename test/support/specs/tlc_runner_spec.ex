@@ -104,9 +104,10 @@ defmodule Outlaw.Specs.TLCRunner do
 
   @limit 2
   @wait 2_000
-  # How long project/1 waits for the result to catch up with the OS process
-  # (see `snapshot/1`).
-  @consistency_wait 1_000
+  # How long project/1 waits for the result to catch up with the OS process,
+  # and for a SIGKILLed process to stop looking alive (see `snapshot/1`).
+  @reply_wait 1_000
+  @kill_wait 100
 
   @impl true
   def init do
@@ -127,9 +128,18 @@ defmodule Outlaw.Specs.TLCRunner do
 
   # The process that "called run/2": starts the run, hands the Run back to
   # the mapping, awaits the result and records it — unless CallerDies already
-  # decided it never sees one — then stays alive.
+  # decided it never sees one — then stays alive. Unlinked (a link would make
+  # the mapping process part of the spec's "caller"), but it monitors the
+  # mapping process and exits when that goes down (e.g. the conformance worker
+  # killed on action_timeout), so it never leaks; the runner's watchdog then
+  # cleans up the fake.
   defp caller_loop(mapping, agent, dir) do
+    mon = Process.monitor(mapping)
+
     receive do
+      {:DOWN, ^mon, :process, _, _} ->
+        :ok
+
       {:start, args} ->
         {:ok, run} =
           TLCRunner.start(args,
@@ -141,15 +151,34 @@ defmodule Outlaw.Specs.TLCRunner do
           )
 
         send(mapping, {:run, self(), run})
-        result = run |> TLCRunner.await() |> result_name()
 
-        Agent.update(agent, fn
-          %{caller_killed: true} = st -> st
-          st -> %{st | result: result}
-        end)
+        with {:ok, reply} <- await_unless_down(run, mon) do
+          result = result_name(reply)
 
-        receive do
+          Agent.update(agent, fn
+            %{caller_killed: true} = st -> st
+            st -> %{st | result: result}
+          end)
+
+          receive do
+            {:DOWN, ^mon, :process, _, _} -> :ok
+          end
         end
+    end
+  end
+
+  # TLCRunner.await/2 in short slices, so the mapping's :DOWN is noticed.
+  defp await_unless_down(run, mon) do
+    case TLCRunner.await(run, 50) do
+      {:error, %{kind: :await_timeout}} ->
+        receive do
+          {:DOWN, ^mon, :process, _, _} -> :mapping_down
+        after
+          0 -> await_unless_down(run, mon)
+        end
+
+      reply ->
+        {:ok, reply}
     end
   end
 
@@ -256,14 +285,22 @@ defmodule Outlaw.Specs.TLCRunner do
     end
   end
 
-  # Waits for the result. If a different one won the race (LimitKill on a
-  # just-sent Progress), this action had no effect.
+  # Waits for the result. The only legitimate lost race is LimitKill winning
+  # (the runner read an over-limit line from a just-sent Progress first): then
+  # this action had no effect. Anything else — no result at all, or an
+  # unexpected one — is reported as {:ok, ctx}, so the projection exposes the
+  # divergence (the conformance runner checks a rejection's projection only
+  # against the closure, so rejecting here would hide e.g. an ignored cancel).
   defp await_result(ctx, expected) do
     FakeTLC.until(@wait, fn -> snapshot(ctx).result != "none" end)
 
-    if snapshot(ctx).result == expected,
-      do: {:ok, ctx},
-      else: {:rejected, :already_finished, ctx}
+    case snapshot(ctx).result do
+      "too_many_states" when expected != "too_many_states" ->
+        {:rejected, :limit_kill_won, ctx}
+
+      _ ->
+        {:ok, ctx}
+    end
   end
 
   @impl true
@@ -271,22 +308,42 @@ defmodule Outlaw.Specs.TLCRunner do
 
   # The spec changes `os` and `result` in one step (LimitKill, Exit, Timeout,
   # Cancel); the implementation does it in two (the runner kills / sees the
-  # exit, then the caller records the reply). While the caller is alive, a
-  # stopped process with no result yet — or a result while the process still
-  # looks alive (killed but not yet reaped) — is that gap, so wait (bounded)
-  # for it to close. A real bug (no reply ever) still shows after the wait.
-  defp snapshot(ctx) do
-    FakeTLC.until(@consistency_wait, fn ->
-      s = raw_snapshot(ctx)
-      if consistent?(s), do: s
-    end) || raw_snapshot(ctx)
+  # exit, then the caller records the reply). Two such gaps are bridged, each
+  # with a bound, after which the raw state is reported (so a real bug, e.g.
+  # no reply ever, still shows):
+  #   * caller alive, process stopped, no result yet: the reply is in flight
+  #     (up to @reply_wait);
+  #   * a kill result (timeout/cancelled/too_many_states) while the process
+  #     still looks alive: SIGKILL latency (up to @kill_wait).
+  # "ok" while the process looks alive is never bridged: the fake writes its
+  # exited marker before exiting, so that state is a real divergence.
+  defp snapshot(ctx), do: snapshot(ctx, System.monotonic_time(:millisecond))
+
+  defp snapshot(ctx, started) do
+    s = raw_snapshot(ctx)
+
+    case gap_bound(s) do
+      nil ->
+        s
+
+      bound ->
+        if System.monotonic_time(:millisecond) - started >= bound do
+          s
+        else
+          Process.sleep(2)
+          snapshot(ctx, started)
+        end
+    end
   end
 
-  defp consistent?(%{caller: "alive", os: os, result: "none"}) when os in ["exited", "killed"],
-    do: false
+  defp gap_bound(%{caller: "alive", os: os, result: "none"}) when os in ["exited", "killed"],
+    do: @reply_wait
 
-  defp consistent?(%{os: "alive", result: result}) when result != "none", do: false
-  defp consistent?(_), do: true
+  defp gap_bound(%{os: "alive", result: result})
+       when result in ["timeout", "cancelled", "too_many_states"],
+       do: @kill_wait
+
+  defp gap_bound(_), do: nil
 
   defp raw_snapshot(ctx) do
     %{seen: seen, result: result} = Agent.get(ctx.agent, & &1)

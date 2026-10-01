@@ -33,6 +33,17 @@ defmodule Outlaw.Tools.TLCRunner do
 
   Options: `:java`, `:jar`, `:timeout` (ms or `:infinity`), `:max_states`
   (all required), `:cd`, `:tmp_dir`.
+
+  Returns `{:ok, %{exit_status: status, output: output}}` when TLC exits, or
+  `{:error, %Outlaw.Error{}}` with kind:
+
+    * `:tlc_timeout` — `:timeout` ms passed; TLC was killed.
+    * `:too_many_states` — TLC reported more than `:max_states` distinct
+      states; TLC was killed.
+    * `:tlc_crashed` — the runner process died without a result (e.g. the
+      port could not be opened).
+
+  (`run/2` awaits with `:infinity`, so it never returns `:await_timeout`.)
   """
   @spec run([String.t()], keyword()) :: {:ok, result()} | {:error, Error.t()}
   def run(tlc_args, opts) do
@@ -72,10 +83,17 @@ defmodule Outlaw.Tools.TLCRunner do
   end
 
   @doc """
-  Waits for the run's result. Only the owner may await. If the runner dies
-  without replying, returns `{:error, %Outlaw.Error{kind: :tlc_crashed}}`; if
-  `timeout` passes first, `{:error, %Outlaw.Error{kind: :await_timeout}}` (the
-  run keeps going).
+  Waits for the run's result. Only the owner may await (others get an
+  `ArgumentError`).
+
+  Returns what `run/2` returns (`{:ok, result}`, or an error of kind
+  `:tlc_timeout`, `:too_many_states` or `:tlc_crashed` — the last when the
+  runner process dies without replying), plus:
+
+    * `:tlc_cancelled` — `cancel/1` stopped the run; TLC was killed.
+    * `:await_timeout` — `timeout` ms passed with no result yet. The run keeps
+      going and the result is still delivered, so `await/2` may be called
+      again.
   """
   @spec await(Run.t(), timeout()) :: {:ok, result()} | {:error, Error.t()}
   def await(%Run{pid: pid, ref: ref, owner: owner}, timeout \\ :infinity) do
