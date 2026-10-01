@@ -41,4 +41,25 @@ defmodule Outlaw.LockTest do
 
     assert {:error, %Outlaw.Error{details: %{changes: [_, _, _]}}} = Lock.check(dir)
   end
+
+  test "corrupt lock file (invalid JSON) returns spec_lock_corrupt error from check/1", %{
+    tmp_dir: dir
+  } do
+    File.write!(Lock.path(dir), "{not valid json")
+    assert {:error, %Outlaw.Error{kind: :spec_lock_corrupt} = e} = Lock.check(dir)
+    assert e.message =~ Lock.path(dir)
+    assert e.message =~ "do not edit or regenerate the lock"
+  end
+
+  test "lock file without files key returns spec_lock_corrupt error from check/1", %{tmp_dir: dir} do
+    File.write!(Lock.path(dir), ~s({"version": 1}))
+    assert {:error, %Outlaw.Error{kind: :spec_lock_corrupt} = e} = Lock.check(dir)
+    assert e.message =~ Lock.path(dir)
+    assert e.message =~ "do not edit or regenerate the lock"
+  end
+
+  test "changes/1 raises Outlaw.Error when lock is corrupt", %{tmp_dir: dir} do
+    File.write!(Lock.path(dir), "{not valid json")
+    assert_raise Outlaw.Error, fn -> Lock.changes(dir) end
+  end
 end

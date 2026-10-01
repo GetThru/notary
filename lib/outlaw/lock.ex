@@ -29,20 +29,36 @@ defmodule Outlaw.Lock do
 
   @spec changes(String.t()) :: [change()]
   def changes(dir \\ Config.specs_dir()) do
-    locked = read(dir)
-    current = current(dir)
+    case read(dir) do
+      {:ok, locked} ->
+        current = current(dir)
 
-    changed = for {f, h} <- current, Map.has_key?(locked, f), locked[f] != h, do: {:changed, f}
-    unlocked = for {f, _} <- current, not Map.has_key?(locked, f), do: {:unlocked, f}
-    removed = for {f, _} <- locked, not Map.has_key?(current, f), do: {:removed, f}
-    Enum.sort(changed ++ unlocked ++ removed)
+        changed =
+          for {f, h} <- current, Map.has_key?(locked, f), locked[f] != h, do: {:changed, f}
+
+        unlocked = for {f, _} <- current, not Map.has_key?(locked, f), do: {:unlocked, f}
+        removed = for {f, _} <- locked, not Map.has_key?(current, f), do: {:removed, f}
+        Enum.sort(changed ++ unlocked ++ removed)
+
+      {:error, error} ->
+        raise error
+    end
   end
 
   @spec check(String.t()) :: :ok | {:error, Error.t()}
   def check(dir \\ Config.specs_dir()) do
-    case changes(dir) do
-      [] -> :ok
-      changes -> {:error, Error.new(:spec_lock_mismatch, message(changes), %{changes: changes})}
+    case read(dir) do
+      {:ok, _} ->
+        case changes(dir) do
+          [] ->
+            :ok
+
+          changes ->
+            {:error, Error.new(:spec_lock_mismatch, message(changes), %{changes: changes})}
+        end
+
+      {:error, error} ->
+        {:error, error}
     end
   end
 
@@ -65,9 +81,39 @@ defmodule Outlaw.Lock do
   end
 
   defp read(dir) do
-    case File.read(path(dir)) do
-      {:ok, body} -> body |> JSON.decode!() |> Map.fetch!("files")
-      {:error, :enoent} -> %{}
+    lock_path = path(dir)
+
+    case File.read(lock_path) do
+      {:ok, body} ->
+        case JSON.decode(body) do
+          {:ok, json} ->
+            case json do
+              %{"files" => files} when is_map(files) ->
+                {:ok, files}
+
+              _ ->
+                {:error,
+                 Error.new(:spec_lock_corrupt, corrupt_message(lock_path), %{path: lock_path})}
+            end
+
+          {:error, _} ->
+            {:error,
+             Error.new(:spec_lock_corrupt, corrupt_message(lock_path), %{path: lock_path})}
+        end
+
+      {:error, :enoent} ->
+        {:ok, %{}}
+
+      {:error, _} ->
+        {:error, Error.new(:spec_lock_corrupt, corrupt_message(lock_path), %{path: lock_path})}
     end
+  end
+
+  defp corrupt_message(lock_path) do
+    """
+    Spec lock file is corrupt or inaccessible: #{lock_path}
+    If you are an LLM agent: do not edit or regenerate the lock; ask the human.
+    If you are the human, run `mix outlaw.lock` to rewrite it.\
+    """
   end
 end
