@@ -25,8 +25,12 @@ defmodule Mix.Tasks.Outlaw.Install do
     end
 
     case Tools.find_java() do
-      {:ok, java} -> Mix.shell().info("Java OK: #{java}")
-      {:error, error} -> Mix.shell().error(error.message)
+      {:ok, java} ->
+        Mix.shell().info("Java OK: #{java}")
+
+      {:error, error} ->
+        Mix.shell().error(error.message)
+        exit({:shutdown, 1})
     end
   end
 end
