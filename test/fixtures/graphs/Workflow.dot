@@ -1,0 +1,66 @@
+strict digraph DiskGraph {
+nodesep=0.35;
+subgraph cluster_graph {
+color="white";
+-6335000432402356949 [label="/\\ gateway = \"up\"\n/\\ status = (u1 :> \"cart\" @@ u2 :> \"cart\")",style = filled]
+-6335000432402356949 -> 3702589141398359036 [label="Pay",color="black",fontcolor="black"];
+3702589141398359036 [label="/\\ gateway = \"up\"\n/\\ status = (u1 :> \"paid\" @@ u2 :> \"cart\")"];
+-6335000432402356949 -> 3075226179898131945 [label="Pay",color="black",fontcolor="black"];
+3075226179898131945 [label="/\\ gateway = \"up\"\n/\\ status = (u1 :> \"cart\" @@ u2 :> \"paid\")"];
+3702589141398359036 -> -6224935971681800392 [label="Ship",color="black",fontcolor="black"];
+-6224935971681800392 [label="/\\ gateway = \"up\"\n/\\ status = (u1 :> \"shipped\" @@ u2 :> \"cart\")"];
+3075226179898131945 -> -5630952582244603074 [label="Pay",color="black",fontcolor="black"];
+-5630952582244603074 [label="/\\ gateway = \"up\"\n/\\ status = (u1 :> \"paid\" @@ u2 :> \"paid\")"];
+-6335000432402356949 -> 2296603568765165944 [label="GatewayDown",color="black",fontcolor="black"];
+2296603568765165944 [label="/\\ gateway = \"down\"\n/\\ status = (u1 :> \"cart\" @@ u2 :> \"cart\")"];
+-5630952582244603074 -> 3108749238291632122 [label="Ship",color="black",fontcolor="black"];
+3075226179898131945 -> 3498154155186646036 [label="Ship",color="black",fontcolor="black"];
+3498154155186646036 [label="/\\ gateway = \"up\"\n/\\ status = (u1 :> \"cart\" @@ u2 :> \"shipped\")"];
+-6224935971681800392 -> 3108749238291632122 [label="Pay",color="black",fontcolor="black"];
+3108749238291632122 [label="/\\ gateway = \"up\"\n/\\ status = (u1 :> \"shipped\" @@ u2 :> \"paid\")"];
+3702589141398359036 -> -5630952582244603074 [label="Pay",color="black",fontcolor="black"];
+3702589141398359036 -> -8887678663792341073 [label="GatewayDown",color="black",fontcolor="black"];
+-8887678663792341073 [label="/\\ gateway = \"down\"\n/\\ status = (u1 :> \"paid\" @@ u2 :> \"cart\")"];
+3108749238291632122 -> -9014545829737178288 [label="Ship",color="black",fontcolor="black"];
+-9014545829737178288 [label="/\\ gateway = \"up\"\n/\\ status = (u1 :> \"shipped\" @@ u2 :> \"shipped\")"];
+-6224935971681800392 -> 3471475990787784418 [label="GatewayDown",color="black",fontcolor="black"];
+3471475990787784418 [label="/\\ gateway = \"down\"\n/\\ status = (u1 :> \"shipped\" @@ u2 :> \"cart\")"];
+3498154155186646036 -> 8954053254217418824 [label="Pay",color="black",fontcolor="black"];
+3075226179898131945 -> -7104490507801394758 [label="GatewayDown",color="black",fontcolor="black"];
+-7104490507801394758 [label="/\\ gateway = \"down\"\n/\\ status = (u1 :> \"cart\" @@ u2 :> \"paid\")"];
+-5630952582244603074 -> 8954053254217418824 [label="Ship",color="black",fontcolor="black"];
+8954053254217418824 [label="/\\ gateway = \"up\"\n/\\ status = (u1 :> \"paid\" @@ u2 :> \"shipped\")"];
+2296603568765165944 -> -6335000432402356949 [label="GatewayUp",color="black",fontcolor="black"];
+3471475990787784418 -> -6224935971681800392 [label="GatewayUp",color="black",fontcolor="black"];
+8954053254217418824 -> -9014545829737178288 [label="Ship",color="black",fontcolor="black"];
+-9014545829737178288 -> -6342747223015952210 [label="GatewayDown",color="black",fontcolor="black"];
+-6342747223015952210 [label="/\\ gateway = \"down\"\n/\\ status = (u1 :> \"shipped\" @@ u2 :> \"shipped\")"];
+3108749238291632122 -> -5578338964985962976 [label="GatewayDown",color="black",fontcolor="black"];
+-5578338964985962976 [label="/\\ gateway = \"down\"\n/\\ status = (u1 :> \"shipped\" @@ u2 :> \"paid\")"];
+-8887678663792341073 -> 3471475990787784418 [label="Ship",color="black",fontcolor="black"];
+-6342747223015952210 -> -9014545829737178288 [label="GatewayUp",color="black",fontcolor="black"];
+8954053254217418824 -> -1877276139447756398 [label="GatewayDown",color="black",fontcolor="black"];
+-1877276139447756398 [label="/\\ gateway = \"down\"\n/\\ status = (u1 :> \"paid\" @@ u2 :> \"shipped\")"];
+-7104490507801394758 -> -6252601458867438130 [label="Ship",color="black",fontcolor="black"];
+-5630952582244603074 -> 436976814589456237 [label="GatewayDown",color="black",fontcolor="black"];
+436976814589456237 [label="/\\ gateway = \"down\"\n/\\ status = (u1 :> \"paid\" @@ u2 :> \"paid\")"];
+3498154155186646036 -> -6252601458867438130 [label="GatewayDown",color="black",fontcolor="black"];
+-6252601458867438130 [label="/\\ gateway = \"down\"\n/\\ status = (u1 :> \"cart\" @@ u2 :> \"shipped\")"];
+-1877276139447756398 -> -6342747223015952210 [label="Ship",color="black",fontcolor="black"];
+-7104490507801394758 -> 3075226179898131945 [label="GatewayUp",color="black",fontcolor="black"];
+-1877276139447756398 -> 8954053254217418824 [label="GatewayUp",color="black",fontcolor="black"];
+-6252601458867438130 -> 3498154155186646036 [label="GatewayUp",color="black",fontcolor="black"];
+-5578338964985962976 -> -6342747223015952210 [label="Ship",color="black",fontcolor="black"];
+-8887678663792341073 -> 3702589141398359036 [label="GatewayUp",color="black",fontcolor="black"];
+436976814589456237 -> -5578338964985962976 [label="Ship",color="black",fontcolor="black"];
+-5578338964985962976 -> 3108749238291632122 [label="GatewayUp",color="black",fontcolor="black"];
+436976814589456237 -> -1877276139447756398 [label="Ship",color="black",fontcolor="black"];
+436976814589456237 -> -5630952582244603074 [label="GatewayUp",color="black",fontcolor="black"];
+{rank = same; -6335000432402356949;}
+{rank = same; 3075226179898131945;2296603568765165944;3702589141398359036;}
+{rank = same; 3498154155186646036;-7104490507801394758;-6224935971681800392;-8887678663792341073;-5630952582244603074;}
+{rank = same; -6252601458867438130;3471475990787784418;8954053254217418824;3108749238291632122;436976814589456237;}
+{rank = same; -9014545829737178288;-1877276139447756398;-5578338964985962976;}
+{rank = same; -6342747223015952210;}
+}
+}

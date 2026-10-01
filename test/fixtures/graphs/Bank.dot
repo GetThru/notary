@@ -1,0 +1,35 @@
+strict digraph DiskGraph {
+nodesep=0.35;
+subgraph cluster_graph {
+color="white";
+-4952566529618499488 [label="/\\ balance = 0\n/\\ lastOp = \"none\"",style = filled]
+-4952566529618499488 -> 4588457991056423046 [label="Deposit",color="black",fontcolor="black"];
+4588457991056423046 [label="/\\ balance = 1\n/\\ lastOp = \"deposit\""];
+-4952566529618499488 -> -8615090887939123302 [label="Deposit",color="black",fontcolor="black"];
+-8615090887939123302 [label="/\\ balance = 2\n/\\ lastOp = \"deposit\""];
+4588457991056423046 -> -8615090887939123302 [label="Deposit",color="black",fontcolor="black"];
+4588457991056423046 -> 4431675450326382658 [label="Withdraw",color="black",fontcolor="black"];
+4431675450326382658 [label="/\\ balance = 0\n/\\ lastOp = \"withdraw\""];
+-8615090887939123302 -> -1928985104280072850 [label="Deposit",color="black",fontcolor="black"];
+-1928985104280072850 [label="/\\ balance = 3\n/\\ lastOp = \"deposit\""];
+4588457991056423046 -> -1928985104280072850 [label="Deposit",color="black",fontcolor="black"];
+4431675450326382658 -> 4588457991056423046 [label="Deposit",color="black",fontcolor="black"];
+4431675450326382658 -> -8615090887939123302 [label="Deposit",color="black",fontcolor="black"];
+-1928985104280072850 -> 1083174572211893845 [label="Withdraw",color="black",fontcolor="black"];
+1083174572211893845 [label="/\\ balance = 2\n/\\ lastOp = \"withdraw\""];
+-8615090887939123302 -> -7026256578157002426 [label="Withdraw",color="black",fontcolor="black"];
+-7026256578157002426 [label="/\\ balance = 1\n/\\ lastOp = \"withdraw\""];
+1083174572211893845 -> -1928985104280072850 [label="Deposit",color="black",fontcolor="black"];
+-1928985104280072850 -> -7026256578157002426 [label="Withdraw",color="black",fontcolor="black"];
+1083174572211893845 -> -7026256578157002426 [label="Withdraw",color="black",fontcolor="black"];
+-7026256578157002426 -> -8615090887939123302 [label="Deposit",color="black",fontcolor="black"];
+1083174572211893845 -> 4431675450326382658 [label="Withdraw",color="black",fontcolor="black"];
+-7026256578157002426 -> 4431675450326382658 [label="Withdraw",color="black",fontcolor="black"];
+-8615090887939123302 -> 4431675450326382658 [label="Withdraw",color="black",fontcolor="black"];
+-7026256578157002426 -> -1928985104280072850 [label="Deposit",color="black",fontcolor="black"];
+{rank = same; -4952566529618499488;}
+{rank = same; 4588457991056423046;-8615090887939123302;}
+{rank = same; 4431675450326382658;-7026256578157002426;-1928985104280072850;}
+{rank = same; 1083174572211893845;}
+}
+}
