@@ -88,9 +88,9 @@ defmodule Outlaw.ConformanceTest do
     assert Conformance.fair_internal_actions(Fixtures.AsyncSpec) == ["Complete"]
   end
 
-  test "TLCRunner's own mapping: Reap is fair (WF_vars(Reap)), LimitKill is not" do
+  test "TLCRunner's own mapping: Reap and LimitKill are both fair (WF_vars on each)" do
     assert Conformance.internal_actions(Outlaw.Specs.TLCRunner) == ["LimitKill", "Reap"]
-    assert Conformance.fair_internal_actions(Outlaw.Specs.TLCRunner) == ["Reap"]
+    assert Conformance.fair_internal_actions(Outlaw.Specs.TLCRunner) == ["LimitKill", "Reap"]
   end
 
   test "discover_mappings finds discoverable mappings only" do

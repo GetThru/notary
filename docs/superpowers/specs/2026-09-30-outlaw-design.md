@@ -213,9 +213,10 @@ action (e.g. `WF_vars(Next)` -- `Next` is the whole-step formula, not an edge
 label) is harmless: `Outlaw.Conformance.check/3` only keeps its intersection
 with the mapping's declared `internal:` actions. Only that intersection --
 the *fair* internal actions -- must eventually fire; a declared internal
-action the spec doesn't mark fair (e.g. `LimitKill` in `specs/TLCRunner.tla`,
-which has `WF_vars(Reap)` but nothing naming `LimitKill`) is never required to
-happen.
+action the spec doesn't mark fair (e.g. the fixture spec `Async` without its
+`WF_status(Complete)`) is never required to happen. (`specs/TLCRunner.tla`
+originally marked only `Reap` fair; a disabled limit kill then passed
+conformance, which led the spec author to add `WF_vars(LimitKill)`.)
 
 At the end of every run that declares internal actions, and at every `:settle`
 point the generator places mid-run (§5.1), the runner *settles*:
