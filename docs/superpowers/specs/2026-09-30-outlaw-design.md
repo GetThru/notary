@@ -480,6 +480,52 @@ Distinct, actionable messages (and structured `--json` errors) for:
 | Action timeout | step, action, params |
 | Spec lock mismatch | which spec; run `mix outlaw.lock` if intentional |
 
+### 9.1 Source diagnostics (pentiment)
+
+Text reports render failures and errors as compiler-style diagnostics with
+[pentiment](https://hex.pm/packages/pentiment) (`{:pentiment, "~> 0.2"}`): a
+source excerpt with line numbers and labelled spans, then `help:` / `note:`
+lines. The conformance step table still follows the diagnostic (a trace isn't
+source). When no source location can be found, the report is the plain text
+it was before.
+
+**Locators.**
+- `Outlaw.Spec.Locate` finds definitions in a spec's `.tla` text — `Name ==`
+  and `Name(params) ==` — with their line ranges; for a definition whose body
+  is a `/\` list, its conjuncts with line/column spans, classified as
+  **guards** (no primed variable) or **effects** (a primed variable); and
+  `WF_`/`SF_` occurrences in `Spec`. It returns `nil` for anything it can't
+  parse; diagnostics then fall back to the definition's name line.
+- `Outlaw.Mapping.Locate` finds a mapping module's source file
+  (`module.module_info(:compile)[:source]`), parses it, and returns the lines
+  of the `use Outlaw.Conformance` call and of the `def init`, `def actions`,
+  `def project` and `def action("Name", ...)` clauses.
+
+**What each report points at.**
+
+| Kind | Primary label | Secondary / help |
+|---|---|---|
+| `action_not_enabled` | the action's guard conjuncts — one guard: "false here: ⟨state⟩"; several: "one of these is false in ⟨state⟩" (Outlaw doesn't evaluate TLA+, so it never claims which) | help: return `{:rejected, reason, ctx}` |
+| `illegal_transition` | the action's effect conjuncts: "implementation reached ⟨p′⟩" | note: what the spec allowed |
+| `rejected_with_side_effect` | the action's name: "rejected, but the state changed ⟨p⟩ → ⟨p′⟩" | |
+| `init_mismatch` | `Init`'s definition | note: the spec's initial states |
+| `internal_action_stalled` | each pending action's definition | secondary: its `WF_`/`SF_` occurrence in `Spec`, "fairness requires this to happen" |
+| `invalid_projection` | `def project` in the mapping | help: expected variables / value-type hint |
+| `invalid_action_result` | the matching `def action("Name", ...)` clause, or `def init` | |
+| `exception` | the top stack frame inside the project (raw file/line kept in the failure details) | note: the exception message |
+| `timeout` / `crashed` | the clause named by `during` (`action/3 Inc` → `def action("Inc", ...)`) | |
+| `invalid_mapping` | the `use Outlaw.Conformance` line | secondary: `def actions`; help: known actions / variables |
+| `spec_error` (SANY) | SANY's reported line/column, with its message | |
+
+Spec lock mismatches, Java/jar and TLC process errors keep their text form (no
+source position).
+
+**Rendering.** Colors only when stdout is a TTY, ANSI is enabled and `--json`
+is not set; otherwise plain text (tests render plain). TLA+ excerpts are not
+syntax-highlighted (no makeup lexer), only annotated. JSON keeps its shape and
+gains `"location": {"file", "line", "column"}` on failures and errors that
+have one.
+
 ## 10. Development environment
 
 The Outlaw repo ships a `flake.nix` dev shell providing Elixir/Erlang, a JDK, and
