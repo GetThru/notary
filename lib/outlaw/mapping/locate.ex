@@ -32,9 +32,9 @@ defmodule Outlaw.Mapping.Locate do
       %{
         file: file,
         use_line: find_use_line(exprs),
-        init_line: find_def_line(exprs, :init),
-        actions_line: find_def_line(exprs, :actions),
-        project_line: find_def_line(exprs, :project),
+        init_line: find_def_line(exprs, :init, 0),
+        actions_line: find_def_line(exprs, :actions, 0),
+        project_line: find_def_line(exprs, :project, 1),
         action_lines: find_action_lines(exprs)
       }
     else
@@ -101,28 +101,53 @@ defmodule Outlaw.Mapping.Locate do
     end)
   end
 
-  defp find_def_line(exprs, name) do
+  # Unwraps a `when`-guarded def head (`def name(args) when guard`) down to
+  # its plain `{name, meta, args}` signature, so matching by name/arity works
+  # the same whether or not the clause has a guard.
+  defp def_signature({:when, _meta, [signature, _guard]}), do: signature
+  defp def_signature(signature), do: signature
+
+  defp find_def_line(exprs, name, arity) do
     Enum.find_value(exprs, fn
-      {:def, meta, [{^name, _, _args} | _]} -> Keyword.get(meta, :line)
-      _ -> nil
+      {:def, meta, [head | _]} ->
+        case def_signature(head) do
+          {^name, _, args} -> if arity_matches?(args, arity), do: Keyword.get(meta, :line)
+          _ -> nil
+        end
+
+      _ ->
+        nil
     end)
   end
 
+  defp arity_matches?(nil, 0), do: true
+  defp arity_matches?(args, arity) when is_list(args), do: length(args) == arity
+  defp arity_matches?(_, _), do: false
+
   defp find_action_lines(exprs) do
     exprs
-    |> Enum.filter(&action_clause?/1)
-    |> Enum.reduce(%{}, fn {:def, meta, [{:action, _, [first_arg | _]} | _]}, acc ->
-      line = Keyword.get(meta, :line)
+    |> Enum.reduce(%{}, fn expr, acc ->
+      case action_def(expr) do
+        {:ok, first_arg, line} ->
+          key = if is_binary(first_arg), do: first_arg, else: "*"
+          Map.put_new(acc, key, line)
 
-      case first_arg do
-        literal when is_binary(literal) -> Map.put_new(acc, literal, line)
-        _ -> Map.put_new(acc, "*", line)
+        :error ->
+          acc
       end
     end)
   end
 
-  defp action_clause?({:def, _meta, [{:action, _, args} | _]}) when is_list(args),
-    do: length(args) == 3
+  defp action_def({:def, meta, [head | _]}) do
+    case def_signature(head) do
+      {:action, _, args} when is_list(args) and length(args) == 3 ->
+        [first_arg | _] = args
+        {:ok, first_arg, Keyword.get(meta, :line)}
 
-  defp action_clause?(_), do: false
+      _ ->
+        :error
+    end
+  end
+
+  defp action_def(_), do: :error
 end

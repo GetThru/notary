@@ -68,6 +68,22 @@ defmodule Outlaw.SpecTest do
     assert Spec.fair_actions(spec) == MapSet.new(["Real"])
   end
 
+  test "fair_actions treats (* (* *) *) block comments as nested, not as ending at the first *)",
+       %{tmp_dir: dir} do
+    write(dir, [
+      {"X.tla",
+       ~S"""
+       ---- MODULE X ----
+       (* outer (* inner *) WF_vars(ShouldNotBeFound) still a comment *)
+       Spec == WF_vars(Real)
+       ====
+       """}
+    ])
+
+    spec = Spec.from_path(Path.join(dir, "X.tla"))
+    assert Spec.fair_actions(spec) == MapSet.new(["Real"])
+  end
+
   test "fair_actions returns names even when they are not actual graph actions (e.g. Next)", %{
     tmp_dir: dir
   } do

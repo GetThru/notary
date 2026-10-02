@@ -112,17 +112,37 @@ defmodule Outlaw.Spec do
     |> strip_line_comments()
   end
 
+  # `(* ... *)` block comments nest (`(* outer (* inner *) still outer *)`),
+  # so a non-greedy regex (which would stop at the first `*)`) isn't enough —
+  # this tracks nesting depth instead, one character at a time.
   defp strip_block_comments(text) do
-    Regex.replace(~r/\(\*.*?\*\)/s, text, fn comment ->
-      comment
-      |> String.graphemes()
-      |> Enum.map(fn
-        "\n" -> "\n"
-        _ -> " "
-      end)
-      |> Enum.join()
-    end)
+    text
+    |> String.graphemes()
+    |> strip_block_chars(0, [])
+    |> Enum.reverse()
+    |> Enum.join()
   end
+
+  defp strip_block_chars([], _depth, acc), do: acc
+
+  defp strip_block_chars(["(", "*" | rest], depth, acc) do
+    strip_block_chars(rest, depth + 1, [" ", " " | acc])
+  end
+
+  defp strip_block_chars(["*", ")" | rest], depth, acc) when depth > 0 do
+    strip_block_chars(rest, depth - 1, [" ", " " | acc])
+  end
+
+  defp strip_block_chars([ch | rest], depth, acc) when depth > 0 do
+    strip_block_chars(rest, depth, [blank(ch) | acc])
+  end
+
+  defp strip_block_chars([ch | rest], depth, acc) do
+    strip_block_chars(rest, depth, [ch | acc])
+  end
+
+  defp blank("\n"), do: "\n"
+  defp blank(_), do: " "
 
   defp strip_line_comments(text) do
     text

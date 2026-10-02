@@ -67,8 +67,14 @@ defmodule Outlaw.Spec.Locate do
 
         conjuncts =
           case find_body_start(lines, idx, match_len, end_idx) do
-            nil -> []
-            {body_idx, body_col} -> find_conjuncts(lines, body_idx, body_col, end_idx)
+            nil ->
+              []
+
+            {body_idx, body_col} ->
+              case resolve_conjunct_list_start(lines, body_idx, body_col, end_idx) do
+                nil -> []
+                {list_idx, list_col} -> find_conjuncts(lines, list_idx, list_col, end_idx)
+              end
           end
 
         %{name: name, line: line_no, column: column, end_line: end_idx + 1, conjuncts: conjuncts}
@@ -132,13 +138,82 @@ defmodule Outlaw.Spec.Locate do
   end
 
   defp find_body_start(lines, header_idx, match_len, end_idx) do
-    header_line = Enum.at(lines, header_idx)
-    remainder = String.slice(header_line, match_len, String.length(header_line) - match_len)
+    skip_ws_from(lines, header_idx, match_len, end_idx)
+  end
+
+  # Skips forward from (idx, col) — which may be mid-line — to the next
+  # non-blank character, scanning later lines if the rest of this one is
+  # blank. Returns `{idx, col}` of that character, or `nil` if the body runs
+  # out before one is found.
+  defp skip_ws_from(lines, idx, col, end_idx) do
+    line = Enum.at(lines, idx)
+    remainder = String.slice(line, col, String.length(line) - col)
 
     case first_non_ws(remainder) do
-      {offset, _ch} -> {header_idx, match_len + offset}
-      nil -> find_first_nonblank(lines, header_idx + 1, end_idx)
+      {offset, _ch} -> {idx, col + offset}
+      nil -> find_first_nonblank(lines, idx + 1, end_idx)
     end
+  end
+
+  # If the body is `LET ... IN <list>`, the real conjunct list (if any) is
+  # after the top-level `IN` — the one matching this `LET`, skipping over any
+  # nested `LET ... IN` inside the bindings. Anything else is returned as-is.
+  defp resolve_conjunct_list_start(lines, idx, col, end_idx) do
+    case word_at(lines, idx, col) do
+      "LET" ->
+        case skip_let_in(lines, idx, col + String.length("LET"), end_idx, 1) do
+          nil -> nil
+          {in_idx, in_col} -> skip_ws_from(lines, in_idx, in_col, end_idx)
+        end
+
+      _ ->
+        {idx, col}
+    end
+  end
+
+  defp word_at(lines, idx, col) do
+    line = Enum.at(lines, idx)
+    tail = String.slice(line, col, String.length(line) - col)
+
+    case Regex.run(~r/^[A-Za-z_][A-Za-z0-9_]*/, tail) do
+      [word] -> word
+      _ -> nil
+    end
+  end
+
+  @let_in_re ~r/\b(?:LET|IN)\b/
+
+  defp skip_let_in(lines, idx, col, end_idx, depth) do
+    case find_keyword_after(lines, idx, col, end_idx) do
+      nil ->
+        nil
+
+      {kidx, "LET", after_col} ->
+        skip_let_in(lines, kidx, after_col, end_idx, depth + 1)
+
+      {kidx, "IN", after_col} when depth == 1 ->
+        {kidx, after_col}
+
+      {kidx, "IN", after_col} ->
+        skip_let_in(lines, kidx, after_col, end_idx, depth - 1)
+    end
+  end
+
+  defp find_keyword_after(lines, start_idx, start_col, end_idx) do
+    Enum.reduce_while(start_idx..end_idx, nil, fn idx, _ ->
+      line = Enum.at(lines, idx)
+      search_from = if idx == start_idx, do: start_col, else: 0
+      tail = String.slice(line, search_from, String.length(line) - search_from)
+
+      case Regex.run(@let_in_re, tail, return: :index) do
+        [{rel_start, len}] ->
+          col = search_from + rel_start
+          {:halt, {idx, String.slice(line, col, len), col + len}}
+
+        nil ->
+          {:cont, nil}
+      end
+    end)
   end
 
   defp find_first_nonblank(_lines, idx, end_idx) when idx > end_idx, do: nil
@@ -215,8 +290,15 @@ defmodule Outlaw.Spec.Locate do
     end)
   end
 
+  @string_literal_re ~r/"[^"]*"/
+
   defp classify(text) do
-    if Regex.match?(@prime_re, text), do: :effect, else: :guard
+    # A `'` inside a string literal (e.g. `/\ msg = "don't"`) isn't a primed
+    # variable, so blank out string contents before checking.
+    cleaned =
+      Regex.replace(@string_literal_re, text, fn s -> String.duplicate(" ", String.length(s)) end)
+
+    if Regex.match?(@prime_re, cleaned), do: :effect, else: :guard
   end
 
   defp slice_span(lines, start_idx, start_col, end_idx, end_col) when start_idx == end_idx do

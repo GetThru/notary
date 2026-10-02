@@ -119,6 +119,51 @@ defmodule Outlaw.Spec.LocateTest do
       assert Locate.definition("", "Inc") == nil
       assert Locate.definition("Inc == 1", "") == nil
     end
+
+    test "a ' inside a string literal is not mistaken for a primed variable" do
+      text = """
+      ---- MODULE X ----
+      Foo == /\\ msg = "don't"
+             /\\ other = 1
+      ====
+      """
+
+      assert %{conjuncts: [c1, c2]} = Locate.definition(text, "Foo")
+      assert c1.kind == :guard
+      assert c1.text == "/\\ msg = \"don't\""
+      assert c2.kind == :guard
+      assert c2.text == "/\\ other = 1"
+    end
+
+    test "nested (* (* *) *) block comments don't leak a name into view" do
+      text = """
+      ---- MODULE X ----
+      (* outer (* Hidden == 1 *) still a comment *)
+      Real == 2
+      ====
+      """
+
+      assert Locate.definition(text, "Hidden") == nil
+      assert %{name: "Real", line: 3} = Locate.definition(text, "Real")
+    end
+
+    test "LET ... IN: conjuncts come from the /\\ list after the top-level IN" do
+      text =
+        "---- MODULE X ----\n" <>
+          "Foo == LET x == 1 IN /\\ a = 1\n" <>
+          String.duplicate(" ", 21) <>
+          "/\\ b' = 2\n" <>
+          "====\n"
+
+      assert %{name: "Foo", line: 2, column: 1, end_line: 3, conjuncts: [guard, effect]} =
+               Locate.definition(text, "Foo")
+
+      assert guard.kind == :guard
+      assert guard.text == "/\\ a = 1"
+      assert effect.kind == :effect
+      assert effect.text == "/\\ b' = 2"
+      assert guard.column == effect.column
+    end
   end
 
   describe "fairness/2" do
@@ -158,6 +203,25 @@ defmodule Outlaw.Spec.LocateTest do
     test "never raises on odd input" do
       assert Locate.fairness("", "Reap") == nil
       assert Locate.fairness("WF_vars(Reap)", "") == nil
+    end
+
+    test "nested (* (* *) *) block comments fully hide what they contain" do
+      text = """
+      ---- MODULE X ----
+      (* outer (* WF_vars(Hidden) *) still a comment WF_vars(StillHidden) *)
+      Spec == WF_vars(Real)
+      ====
+      """
+
+      assert Locate.fairness(text, "Hidden") == nil
+      assert Locate.fairness(text, "StillHidden") == nil
+
+      assert Locate.fairness(text, "Real") == %{
+               line: 3,
+               column: 9,
+               end_column: 22,
+               text: "WF_vars(Real)"
+             }
     end
   end
 end
