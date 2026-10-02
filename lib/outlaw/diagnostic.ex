@@ -85,12 +85,19 @@ defmodule Outlaw.Diagnostic do
          action when is_binary(action) <- List.last(f.steps).action,
          %{} = def_ <- SpecLocate.definition(text, action) do
       guards = Enum.filter(def_.conjuncts, &(&1.kind == :guard))
-      message = guard_message(guards, pre_state(f))
+      state = pre_state(f)
 
       labels =
         case guards do
-          [] -> [definition_fallback_label(def_, text, message)]
-          _ -> Enum.map(guards, &conjunct_label(&1, :primary, message))
+          [] ->
+            [definition_fallback_label(def_, text, "not enabled in #{format_state(state)}")]
+
+          [one] ->
+            [conjunct_label(one, :primary, "false here: #{format_state(state)}")]
+
+          several ->
+            message = "one of these is false in #{format_state(state)}"
+            Enum.map(several, &conjunct_label(&1, :primary, message))
         end
 
       report =
@@ -105,10 +112,6 @@ defmodule Outlaw.Diagnostic do
     end
   end
 
-  defp guard_message([_one], state), do: "false here: #{format_state(state)}"
-  defp guard_message([], state), do: "false here: #{format_state(state)}"
-  defp guard_message(_several, state), do: "one of these is false in #{format_state(state)}"
-
   # -- illegal_transition -------------------------------------------------------
 
   defp illegal_transition(f, spec) do
@@ -118,17 +121,16 @@ defmodule Outlaw.Diagnostic do
       effects = Enum.filter(def_.conjuncts, &(&1.kind == :effect))
       message = "implementation reached #{format_state(List.last(f.steps).projection)}"
 
-      label =
+      labels =
         case effects do
-          [] -> definition_fallback_label(def_, text, message)
-          [one] -> conjunct_label(one, :primary, message)
-          many -> merged_conjunct_label(many, :primary, message)
+          [] -> [definition_fallback_label(def_, text, message)]
+          _ -> Enum.map(effects, &conjunct_label(&1, :primary, message))
         end
 
       report =
         f
         |> base_report(rel)
-        |> PReport.with_label(label)
+        |> PReport.with_labels(labels)
         |> PReport.with_note(allowed_note(List.last(f.steps)))
 
       {report, %{rel => text}}
@@ -287,7 +289,7 @@ defmodule Outlaw.Diagnostic do
   defp during_based(f, mapping) do
     with {:ok, rel, text, loc} <- mapping_source(mapping),
          {:ok, line} <- during_line(f.details[:during], loc) do
-      label = mapping_line_label(text, line, during_based_message(f.kind))
+      label = mapping_line_label(text, line, during_based_message(f.kind, f.details[:during]))
       report = f |> base_report(rel) |> PReport.with_label(label)
       {report, %{rel => text}}
     else
@@ -295,8 +297,14 @@ defmodule Outlaw.Diagnostic do
     end
   end
 
-  defp during_based_message(:timeout), do: "timed out here"
-  defp during_based_message(:crashed), do: "crashed here"
+  # A `:timeout` during settling points at `def project` (that's the only
+  # mapping clause `during: "settle"` resolves to, see `during_line/2`), but
+  # the real problem is quiescence -- some fair internal action never idling
+  # -- not that `project/1` itself is slow. "timed out here" would misplace
+  # the blame, so this case gets a softer message instead.
+  defp during_based_message(:timeout, "settle"), do: "settling (polling project/1) timed out"
+  defp during_based_message(:timeout, _during), do: "timed out here"
+  defp during_based_message(:crashed, _during), do: "crashed here"
 
   defp during_line(during, loc) do
     case parse_during(during) do
@@ -325,9 +333,101 @@ defmodule Outlaw.Diagnostic do
   # -- shared helpers -----------------------------------------------------------------
 
   defp base_report(f, source_rel) do
-    PReport.error("Conformance failure: #{f.kind}")
+    PReport.error(headline(f))
     |> PReport.with_code(Atom.to_string(f.kind))
     |> PReport.with_source(source_rel)
+  end
+
+  # A short, descriptive first line -- the error code (`with_code/2` above)
+  # still carries the bare kind (`error[action_not_enabled]: ...`), so this
+  # is purely for a human skimming the header.
+  defp headline(%Failure{kind: :action_not_enabled} = f) do
+    action = List.last(f.steps).action || "the action"
+    "#{action} was accepted, but the spec doesn't allow it in #{format_state(pre_state(f))}"
+  end
+
+  defp headline(%Failure{kind: :illegal_transition} = f) do
+    action = List.last(f.steps).action || "the action"
+    "#{action} reached a state the spec doesn't allow"
+  end
+
+  defp headline(%Failure{kind: :rejected_with_side_effect} = f) do
+    action = List.last(f.steps).action || "the action"
+    "#{action} was rejected, but the state changed"
+  end
+
+  defp headline(%Failure{kind: :init_mismatch}),
+    do: "The initial state isn't one the spec allows"
+
+  defp headline(%Failure{kind: :internal_action_stalled, details: details}) do
+    case Map.get(details, :pending, []) do
+      [one] ->
+        "#{one} never happened, but the spec requires it (fairness)"
+
+      [] ->
+        "An internal action never happened, but the spec requires it (fairness)"
+
+      several ->
+        "#{Enum.join(several, ", ")} never happened, but the spec requires them (fairness)"
+    end
+  end
+
+  defp headline(%Failure{kind: :invalid_projection}),
+    do: "project/1 returned the wrong variables/values"
+
+  defp headline(%Failure{kind: :invalid_action_result, details: details}) do
+    label = during_display(details[:during])
+    suffix = if Map.has_key?(details, :got), do: ": got #{details.got}", else: ""
+    "#{label} returned an invalid result#{suffix}"
+  end
+
+  defp headline(%Failure{kind: :exception, details: details}) do
+    action = during_action_name(details[:during])
+    "#{action} raised #{exception_module(details[:exception])}"
+  end
+
+  defp headline(%Failure{kind: :timeout, details: details}) do
+    "#{during_display(details[:during])} didn't return within #{details[:timeout]} ms"
+  end
+
+  defp headline(%Failure{kind: :crashed, details: details}) do
+    "the implementation process crashed during #{during_display(details[:during])}"
+  end
+
+  defp headline(%Failure{kind: kind}), do: "Conformance failure: #{kind}"
+
+  # The raw clause label as recorded in `details.during`, trimmed of any
+  # trailing params blob (`"action/3 Inc %{}"` -> `"action/3 Inc"`) and with
+  # `"settle"` spelled out -- used where the sentence is built around *which
+  # callback* ran long/crashed (`timeout`, `crashed`, `invalid_action_result`).
+  defp during_display(nil), do: "the implementation"
+  defp during_display("settle"), do: "settling (project/1)"
+
+  defp during_display(during) do
+    case Regex.run(~r/^(action\/3\s+\S+|init\/0|project\/1)/, during) do
+      [m | _] -> m
+      nil -> during
+    end
+  end
+
+  # The bare action name where one applies (`"action/3 Inc %{}"` -> `"Inc"`),
+  # falling back to `during_display/1` otherwise -- used where the sentence
+  # reads naturally with just the name as its subject (`exception`: "Inc
+  # raised ...").
+  defp during_action_name(during) do
+    case during && Regex.run(~r/^action\/3\s+(\S+)/, during) do
+      [_, name] -> name
+      _ -> during_display(during)
+    end
+  end
+
+  defp exception_module(nil), do: "an exception"
+
+  defp exception_module(text) do
+    case Regex.run(~r/^\*\* \(([^)]+)\)/, text) do
+      [_, mod] -> mod
+      _ -> "an exception"
+    end
   end
 
   defp pre_state(f), do: Enum.at(f.steps, -2).projection
@@ -352,8 +452,12 @@ defmodule Outlaw.Diagnostic do
     end
   end
 
+  # Underlines the conjunct's expression itself (`x < Max`), not its leading
+  # `/\` connective and whitespace (`Outlaw.Spec.Locate`'s `expr_line`/
+  # `expr_column`) -- `end_line`/`end_column` need no adjustment since
+  # trailing whitespace is already trimmed there.
   defp conjunct_label(c, priority, message),
-    do: span_label(c.line, c.column, c.end_line, c.end_column, priority, message)
+    do: span_label(c.expr_line, c.expr_column, c.end_line, c.end_column, priority, message)
 
   defp merged_conjunct_label(conjuncts, priority, message) do
     first = List.first(conjuncts)

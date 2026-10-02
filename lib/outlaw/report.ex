@@ -9,7 +9,9 @@ defmodule Outlaw.Report do
           required(:status) => :pass | :fail | :error | :skipped,
           required(:payload) => term(),
           optional(:internal) => [String.t()],
-          optional(:fair) => [String.t()]
+          optional(:fair) => [String.t()],
+          optional(:spec) => Outlaw.Spec.t(),
+          optional(:mapping) => module() | nil
         }
   @type spec_result :: %{spec: String.t(), status: :pass | :fail, stages: [stage()]}
   @type report :: %{status: :pass | :fail, lock: stage() | nil, specs: [spec_result()]}
@@ -173,6 +175,13 @@ defmodule Outlaw.Report do
         |> Outlaw.Diagnostic.failure(spec: spec, mapping: mapping)
         |> Outlaw.Diagnostic.render(colors: colors)
     end
+  rescue
+    # A diagnostic is strictly a bonus on top of the legacy report: a bug in
+    # a locator, a malformed Failure (e.g. empty steps), or any other
+    # surprise while building/rendering it must never take down the report
+    # itself -- fall back to no diagnostic (the plain legacy text), same as
+    # an unlocatable source.
+    _ -> nil
   end
 
   defp legacy_failure_text(spec_name, %Failure{} = f) do
@@ -380,7 +389,7 @@ defmodule Outlaw.Report do
             "spec_allowed" => Enum.map(s.allowed, &state_json/1)
           }
         end),
-      "details" => jsonable(f.details)
+      "details" => jsonable(Map.drop(f.details, [:frame]))
     }
   end
 

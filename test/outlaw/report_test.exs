@@ -211,6 +211,28 @@ defmodule Outlaw.ReportTest do
              "6 replays, 4 items removed, 1 params reduced"
   end
 
+  test "an exception failure's raw :frame never leaks into JSON (it's Outlaw.Diagnostic's plumbing, not user-facing data)" do
+    failure = %{
+      @failure
+      | kind: :exception,
+        details: %{
+          exception: "** (RuntimeError) boom",
+          frame: {"test/support/fixtures/counter_specs.ex", 180}
+        }
+    }
+
+    json =
+      report([%{stage: :conformance, status: :fail, payload: {:error, failure}}])
+      |> Report.to_json()
+      |> JSON.encode!()
+      |> JSON.decode!()
+
+    [conf] = hd(json["specs"])["stages"]
+
+    assert conf["failure"]["details"]["exception"] == "** (RuntimeError) boom"
+    refute Map.has_key?(conf["failure"]["details"], "frame")
+  end
+
   test "format_violation shows the counterexample" do
     text = Report.format_violation("Inv", @violation)
     assert text =~ "TLC found a violation in Inv: Invariant Small is violated. (invariant)"
@@ -443,8 +465,23 @@ defmodule Outlaw.ReportTest do
       |> Report.format()
 
     assert text =~ "error[action_not_enabled]"
-    assert text =~ "test/fixtures/specs/Counter.tla:10:8"
+    assert text =~ "Inc was accepted, but the spec doesn't allow it in x = 3"
+    assert text =~ "test/fixtures/specs/Counter.tla:10:11"
     assert text =~ "Conformance failure in Bank: action_not_enabled"
+  end
+
+  test "a malformed Failure never breaks the report -- diagnostic building/rendering falls back to the legacy text" do
+    counter_spec = Outlaw.Spec.from_path("test/fixtures/specs/Counter.tla")
+    # No steps at all: every Diagnostic builder indexes into f.steps (List.last,
+    # Enum.at(-2), ...), so this would raise inside Outlaw.Diagnostic were it
+    # not guarded.
+    malformed = %Failure{kind: :action_not_enabled, seed: 1, steps: []}
+
+    text =
+      Report.format_failure("Bank", malformed, spec: counter_spec, mapping: nil)
+
+    assert text == Report.format_failure("Bank", malformed)
+    refute text =~ "error["
   end
 
   test "to_json is encodable and structured for LLMs" do

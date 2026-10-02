@@ -19,7 +19,9 @@ defmodule Outlaw.Spec.Locate do
           column: pos_integer(),
           end_line: pos_integer(),
           end_column: pos_integer(),
-          text: String.t()
+          text: String.t(),
+          expr_line: pos_integer(),
+          expr_column: pos_integer()
         }
 
   @type definition :: %{
@@ -285,9 +287,26 @@ defmodule Outlaw.Spec.Locate do
         column: body_col + 1,
         end_line: last_idx + 1,
         end_column: end_col + 1,
-        text: text
+        text: text,
+        expr_line: start_idx + 1,
+        expr_column: body_col + 1 + expr_offset(text)
       }
     end)
+  end
+
+  # The column offset (from the conjunct's own `column`, i.e. the `/\`) of
+  # its expression's first non-blank character -- skipping the `/\` itself
+  # and the whitespace after it, so a diagnostic can underline just `x < Max`
+  # rather than `/\ x < Max`. `/\` always opens the conjunct's own first
+  # line (see `starts_with_and?/2`), so only the first line of `text` matters.
+  defp expr_offset(text) do
+    first_line = text |> String.split("\n") |> List.first()
+    rest = String.slice(first_line, 2, String.length(first_line) - 2)
+
+    case first_non_ws(rest) do
+      {offset, _ch} -> 2 + offset
+      nil -> 2
+    end
   end
 
   @string_literal_re ~r/"[^"]*"/

@@ -23,6 +23,8 @@ defmodule Outlaw.Spec.LocateTest do
       assert guard.end_line == 10
       assert guard.end_column == 18
       assert guard.text == "/\\ x < Max"
+      assert guard.expr_line == 10
+      assert guard.expr_column == 11
 
       assert effect.kind == :effect
       assert effect.line == 11
@@ -30,6 +32,24 @@ defmodule Outlaw.Spec.LocateTest do
       assert effect.end_line == 11
       assert effect.end_column == 21
       assert effect.text == "/\\ x' = x + 1"
+      assert effect.expr_line == 11
+      assert effect.expr_column == 11
+    end
+
+    test "a conjunct's expr_column skips past the /\\ and any extra whitespace after it" do
+      text = """
+      ---- MODULE X ----
+      Foo == /\\   padded = 1
+             /\\ normal = 2
+      ====
+      """
+
+      assert %{conjuncts: [padded, normal]} = Locate.definition(text, "Foo")
+      # column 8 ("/\\"), then 3 extra spaces before "padded" at column 13.
+      assert padded.column == 8
+      assert padded.expr_column == 13
+      assert normal.column == 8
+      assert normal.expr_column == 11
     end
 
     test "Counter Reset: single-line body with no /\\ list has no conjuncts" do

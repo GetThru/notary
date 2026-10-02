@@ -1,8 +1,24 @@
+defmodule Outlaw.DiagnosticTest.CrashedMapping do
+  @moduledoc false
+  # A mapping whose action kills its own (already-spawned, unlinked) worker
+  # process -- the runner observes this as `:crashed`, not `:exception`
+  # (there's nothing to rescue; the process just dies). Used by the
+  # "crashed points at ..." test below, which needs a real, located `:crashed`
+  # failure (`Outlaw.Mapping.Locate` resolves to this very file).
+  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+
+  def init, do: Agent.start_link(fn -> 0 end)
+  def actions, do: %{"Inc" => StreamData.constant(%{})}
+  def action("Inc", _, _pid), do: Process.exit(self(), :kill)
+  def project(pid), do: %{"x" => Agent.get(pid, & &1)}
+end
+
 defmodule Outlaw.DiagnosticTest do
   use ExUnit.Case, async: true
 
   alias Outlaw.Conformance.{Failure, Step}
   alias Outlaw.{Conformance, Diagnostic, Fixtures, Spec}
+  alias Outlaw.DiagnosticTest.CrashedMapping
 
   @counter_spec Spec.from_path("test/fixtures/specs/Counter.tla")
   @async_spec Spec.from_path("test/fixtures/specs/Async.tla")
@@ -23,11 +39,12 @@ defmodule Outlaw.DiagnosticTest do
     |> Diagnostic.render(colors: false)
   end
 
-  test "action_not_enabled points at the guard conjunct in the spec, with the pre-action state" do
+  test "action_not_enabled points at the guard conjunct's expression (not the leading /\\), with the pre-action state" do
     text = render(Fixtures.CounterNoGuardSpec, "Counter")
 
     assert text =~ "error[action_not_enabled]"
-    assert text =~ "test/fixtures/specs/Counter.tla:10:8"
+    assert text =~ "Inc was accepted, but the spec doesn't allow it in x = 3"
+    assert text =~ "test/fixtures/specs/Counter.tla:10:11"
     assert text =~ "Inc == /\\ x < Max"
     assert text =~ "false here: x = 3"
     assert text =~ "help: return {:rejected, reason, ctx}"
@@ -37,6 +54,7 @@ defmodule Outlaw.DiagnosticTest do
     text = render(Fixtures.CounterBadResetSpec, "Counter")
 
     assert text =~ "error[illegal_transition]"
+    assert text =~ "Reset reached a state the spec doesn't allow"
     assert text =~ "test/fixtures/specs/Counter.tla:13:1"
     assert text =~ "Reset == x' = 0"
     assert text =~ "implementation reached x = 1"
@@ -47,6 +65,7 @@ defmodule Outlaw.DiagnosticTest do
     text = render(Fixtures.CounterSideEffectSpec, "Counter")
 
     assert text =~ "error[rejected_with_side_effect]"
+    assert text =~ "Inc was rejected, but the state changed"
     assert text =~ "test/fixtures/specs/Counter.tla:10:1"
     assert text =~ "rejected, but the state changed x = 3 → x = 0"
   end
@@ -55,6 +74,7 @@ defmodule Outlaw.DiagnosticTest do
     text = render(Fixtures.CounterBadInitSpec, "Counter")
 
     assert text =~ "error[init_mismatch]"
+    assert text =~ "The initial state isn't one the spec allows"
     assert text =~ "test/fixtures/specs/Counter.tla:8:1"
     assert text =~ "Init == x = 0"
     assert text =~ "implementation starts at x = 7"
@@ -65,6 +85,7 @@ defmodule Outlaw.DiagnosticTest do
     text = render(Fixtures.AsyncStalledSpec, "Async", [settle_timeout: 50], @async_spec)
 
     assert text =~ "error[internal_action_stalled]"
+    assert text =~ "Complete never happened, but the spec requires it (fairness)"
     assert text =~ "test/fixtures/specs/Async.tla"
     assert text =~ "Complete == /\\ status = \"pending\""
     assert text =~ "WF_status(Complete)"
@@ -75,6 +96,7 @@ defmodule Outlaw.DiagnosticTest do
     text = render(Fixtures.CounterBadProjectionSpec, "Counter")
 
     assert text =~ "error[invalid_projection]"
+    assert text =~ "project/1 returned the wrong variables/values"
     assert text =~ "test/support/fixtures/counter_specs.ex"
     assert text =~ "def project(_pid), do: %{\"x\" => 0, \"extra\" => 1}"
     assert text =~ "help: expected variables: x; got: extra, x"
@@ -84,17 +106,85 @@ defmodule Outlaw.DiagnosticTest do
     text = render(Fixtures.CounterRaisingSpec, "Counter")
 
     assert text =~ "error[exception]"
+    assert text =~ "Inc raised RuntimeError"
     assert text =~ "test/support/fixtures/counter_specs.ex"
     assert text =~ "def action(\"Inc\", _, _pid), do: raise(\"boom\")"
     assert text =~ "note: ** (RuntimeError) boom"
   end
 
-  test "timeout points at the matching def action clause" do
+  test "timeout points at the matching def action clause, with a softer message when settling" do
     text = render(Fixtures.CounterSlowSpec, "Counter", action_timeout: 50, max_runs: 20)
 
     assert text =~ "error[timeout]"
+    assert text =~ "action/3 Inc didn't return within 50 ms"
     assert text =~ "test/support/fixtures/counter_specs.ex"
     assert text =~ "def action(\"Inc\", _, pid) do"
+  end
+
+  test "invalid_action_result points at def init when init/0 doesn't return {:ok, ctx}" do
+    text = render(Fixtures.CounterBadInitResultSpec, "Counter")
+
+    assert text =~ "error[invalid_action_result]"
+    assert text =~ "init/0 returned an invalid result: got :ok"
+    assert text =~ "test/support/fixtures/counter_specs.ex"
+    assert text =~ "def init, do: :ok"
+  end
+
+  test "crashed points at the matching def action clause" do
+    text = render(CrashedMapping, "Counter")
+
+    assert text =~ "error[crashed]"
+    assert text =~ "the implementation process crashed during action/3 Inc"
+    assert text =~ "test/outlaw/diagnostic_test.exs"
+    assert text =~ "def action(\"Inc\", _, _pid), do: Process.exit(self(), :kill)"
+  end
+
+  test "action_not_enabled with several guard conjuncts labels each one, never claiming which is false" do
+    tmp =
+      Path.join(
+        System.tmp_dir!(),
+        "outlaw_diag_several_guards_#{System.unique_integer([:positive])}.tla"
+      )
+
+    File.write!(tmp, """
+    ---- MODULE Temp ----
+    VARIABLE x
+    Init == x = 0
+    Act == /\\ a
+           /\\ b
+           /\\ x' = x + 1
+    Next == Act
+    ====
+    """)
+
+    on_exit(fn -> File.rm(tmp) end)
+
+    spec = Spec.from_path(tmp)
+
+    failure = %Failure{
+      kind: :action_not_enabled,
+      seed: 1,
+      steps: [
+        %Step{index: 0, outcome: :ok, projection: %{"x" => 0}, allowed: [%{"x" => 0}]},
+        %Step{index: 1, action: "Act", outcome: :ok, projection: %{"x" => 1}, allowed: []}
+      ]
+    }
+
+    text =
+      failure
+      |> Diagnostic.failure(spec: spec, mapping: nil)
+      |> Diagnostic.render(colors: false)
+
+    assert text =~ "Act was accepted, but the spec doesn't allow it in x = 0"
+    refute text =~ "false here"
+    # One label per guard conjunct, not a single merged span -- both carry
+    # the same "never claim which one" wording.
+    assert length(:binary.matches(text, "one of these is false in x = 0")) == 2
+    # Each conjunct gets its own underline/branch pair (pentiment renders
+    # sensibly: no merged or collided labels across the two guard lines).
+    assert length(:binary.matches(text, "╰── one of these is false in x = 0")) == 2
+    assert text =~ "/\\ a"
+    assert text =~ "/\\ b"
   end
 
   test "failure/2 returns nil when the action name can't be located in the spec" do

@@ -489,7 +489,8 @@ defmodule Outlaw.Conformance.Runner do
   end
 
   defp frame_if_in_project(file, line) do
-    if not String.starts_with?(file, "deps/") and String.ends_with?(file, ".ex") and
+    if not String.starts_with?(file, "deps/") and
+         (String.ends_with?(file, ".ex") or String.ends_with?(file, ".exs")) and
          File.exists?(file) do
       {file, line}
     end
