@@ -441,6 +441,7 @@ defmodule Outlaw.Diagnostic do
   defp spec_error(e, spec) do
     with %Spec{dir: dir} <- spec,
          %{module: module, line: line, column: column} <- Map.get(e.details, :location),
+         true <- is_binary(module),
          path = Path.join(dir, module <> ".tla"),
          {:ok, text} <- File.read(path) do
       rel = Path.relative_to_cwd(path)

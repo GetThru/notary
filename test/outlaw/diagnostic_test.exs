@@ -346,6 +346,15 @@ defmodule Outlaw.DiagnosticTest do
     assert Diagnostic.error(error, spec: nil, mapping: nil) == nil
   end
 
+  test "error/2 returns nil for spec_error when the location has no module, instead of raising" do
+    error =
+      Outlaw.Error.new(:spec_error, "TLA+ spec error", %{
+        location: %{module: nil, line: 1, column: 1}
+      })
+
+    assert Diagnostic.error(error, spec: @counter_spec, mapping: nil) == nil
+  end
+
   describe "spec_error (needs TLC)" do
     @describetag :tlc
     @describetag :tmp_dir
