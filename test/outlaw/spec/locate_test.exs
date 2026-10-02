@@ -180,6 +180,23 @@ defmodule Outlaw.Spec.LocateTest do
       assert %{name: "Tick", line: 4} = Locate.definition(text, "Tick")
     end
 
+    test "an indented LET binding line doesn't end the definition early" do
+      text = """
+      ---- MODULE X ----
+      Inc == LET a == 1
+            b == 2 IN /\\ x' = x + 1
+      Other == 1
+      ====
+      """
+
+      assert %{name: "Inc", line: 2, end_line: 3, conjuncts: [effect]} =
+               Locate.definition(text, "Inc")
+
+      assert effect.kind == :effect
+      assert effect.text == "/\\ x' = x + 1"
+      assert %{name: "Other", line: 4} = Locate.definition(text, "Other")
+    end
+
     test "LET ... IN: conjuncts come from the /\\ list after the top-level IN" do
       text =
         "---- MODULE X ----\n" <>

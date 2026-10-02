@@ -39,7 +39,9 @@ defmodule Outlaw.Spec.Locate do
           text: String.t()
         }
 
-  @next_def_re ~r/^\s*[A-Za-z_][A-Za-z0-9_]*(?:\([^)]*\))?\s*==/
+  @next_def_re ~r/^(\s*)[A-Za-z_][A-Za-z0-9_]*(?:\([^)]*\))?\s*==/
+  @let_word_re ~r/\bLET\b/
+  @in_word_re ~r/\bIN\b/
   @eq_sep_re ~r/^\s*={4,}\s*$/
   @dash_sep_re ~r/^\s*-{4,}\s*$/
   @prime_re ~r/[A-Za-z_][A-Za-z0-9_]*'/
@@ -64,7 +66,7 @@ defmodule Outlaw.Spec.Locate do
       {idx, ws, match_len} ->
         line_no = idx + 1
         column = String.length(ws) + 1
-        stop_idx = find_stop_index(lines, idx)
+        stop_idx = find_stop_index(lines, idx, ws)
         end_idx = trim_blank_backward(lines, stop_idx - 1, idx)
 
         conjuncts =
@@ -120,15 +122,51 @@ defmodule Outlaw.Spec.Locate do
     end)
   end
 
-  defp find_stop_index(lines, start_idx) do
+  # A line only ends the current definition if it looks like the next
+  # definition's header (or a module separator). A `==` header can also
+  # belong to a LET binding nested inside this definition's own body (e.g.
+  # `Inc == LET a == 1\n      b == 2 IN ...`) -- such a line is always
+  # indented deeper than this definition's own header, and/or sits between
+  # an opening `LET` and its closing `IN`, so neither alone is trusted: a
+  # candidate must be indented no deeper than the header *and* not inside a
+  # LET this scan has already opened (tracked as a running nesting depth).
+  defp find_stop_index(lines, start_idx, header_ws) do
     total = length(lines)
+    header_indent = String.length(header_ws)
+    header_tail = String.slice(Enum.at(lines, start_idx), header_indent..-1//1)
+    depth = let_delta(header_tail)
 
-    Enum.find((start_idx + 1)..(total - 1)//1, total, fn idx ->
-      line = Enum.at(lines, idx)
+    find_stop_from(lines, start_idx + 1, total, header_indent, depth)
+  end
 
-      Regex.match?(@next_def_re, line) or Regex.match?(@eq_sep_re, line) or
-        Regex.match?(@dash_sep_re, line)
-    end)
+  defp find_stop_from(_lines, idx, total, _header_indent, _depth) when idx >= total, do: total
+
+  defp find_stop_from(lines, idx, total, header_indent, depth) do
+    line = Enum.at(lines, idx)
+
+    cond do
+      Regex.match?(@eq_sep_re, line) or Regex.match?(@dash_sep_re, line) ->
+        idx
+
+      depth <= 0 and next_def_line?(line, header_indent) ->
+        idx
+
+      true ->
+        find_stop_from(lines, idx + 1, total, header_indent, max(depth + let_delta(line), 0))
+    end
+  end
+
+  defp next_def_line?(line, header_indent) do
+    case Regex.run(@next_def_re, line) do
+      [_, ws] -> String.length(ws) <= header_indent
+      nil -> false
+    end
+  end
+
+  defp let_delta(text) do
+    lets = @let_word_re |> Regex.scan(text) |> length()
+    ins = @in_word_re |> Regex.scan(text) |> length()
+    lets - ins
   end
 
   defp trim_blank_backward(lines, idx, min_idx) do
