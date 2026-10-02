@@ -426,10 +426,13 @@ Outlaw: verification FAILED.
 Reading the report:
 
 - **`error[action_not_enabled]`** is the same failure rendered as a
-  compiler-style diagnostic: it underlines the exact guard conjunct in
-  `specs/Greeter.tla` that was false (`greeted = FALSE`, in a state where
-  `greeted = TRUE`), with the fix (`help:`) right there instead of buried
-  further down the report.
+  compiler-style diagnostic: it underlines the guard conjunct in
+  `specs/Greeter.tla` (`greeted = FALSE`, in a state where `greeted = TRUE`),
+  with the fix (`help:`) right there instead of buried further down the
+  report. `Greet` has only one guard here, so there's only one candidate to
+  underline. Outlaw doesn't evaluate TLA+, so it never claims *which* guard
+  is false — when an action has several, every one is marked, and none is
+  singled out as the culprit.
 - **The step table** below it is the shortest sequence Outlaw found that
   triggers the bug: greet once (fine), then greet again. The second `Greet`
   should have been refused.

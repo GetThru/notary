@@ -128,6 +128,14 @@ still checks the design across all interleavings. Liveness is checked only on
 the spec, plus the bounded settle check for fair internal actions (above).
 Keep `.cfg` constants small.
 
+The compiler-style diagnostic is a syntactic pointer, not a TLA+ evaluator, so
+it can overclaim: a labelled effect conjunct might actually *disable* the
+action rather than cause the bad transition (e.g. `x' \in {}`), a guard can be
+hidden inside an operator call rather than written out in the action's own
+`/\` list (so it's never labelled at all), and a `.cfg` `CONSTRAINT` can prune
+states out of TLC's exploration entirely. Treat the diagnostic as a place to
+start reading, not a verdict.
+
 Every passing `check` reports a coverage summary (`coverage: actions R/T,
 observed states R/T, transitions R/T`) plus `warning:` lines for gaps — read
 them, don't just trust a pass. A gap can be genuine and permanent rather than
