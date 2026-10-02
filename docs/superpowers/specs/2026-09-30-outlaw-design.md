@@ -483,7 +483,7 @@ Distinct, actionable messages (and structured `--json` errors) for:
 ### 9.1 Source diagnostics (pentiment)
 
 Text reports render failures and errors as compiler-style diagnostics with
-[pentiment](https://hex.pm/packages/pentiment) (`{:pentiment, "~> 0.2"}`): a
+[pentiment](https://hex.pm/packages/pentiment) (`{:pentiment, "~> 0.2.1"}`): a
 source excerpt with line numbers and labelled spans, then `help:` / `note:`
 lines. The conformance step table still follows the diagnostic (a trace isn't
 source). When no source location can be found, the report is the plain text
@@ -493,9 +493,10 @@ it was before.
 - `Outlaw.Spec.Locate` finds definitions in a spec's `.tla` text — `Name ==`
   and `Name(params) ==` — with their line ranges; for a definition whose body
   is a `/\` list, its conjuncts with line/column spans, classified as
-  **guards** (no primed variable) or **effects** (a primed variable); and
-  `WF_`/`SF_` occurrences in `Spec`. It returns `nil` for anything it can't
-  parse; diagnostics then fall back to the definition's name line.
+  **guards** (no primed variable and no `UNCHANGED`) or **effects** (a primed
+  variable, or `UNCHANGED`); and `WF_`/`SF_` occurrences in `Spec`. It returns
+  `nil` for anything it can't parse; diagnostics then fall back to the
+  definition's name line.
 - `Outlaw.Mapping.Locate` finds a mapping module's source file
   (`module.module_info(:compile)[:source]`), parses it, and returns the lines
   of the `use Outlaw.Conformance` call and of the `def init`, `def actions`,
@@ -519,6 +520,14 @@ it was before.
 
 Spec lock mismatches, Java/jar and TLC process errors keep their text form (no
 source position).
+
+**Overclaiming.** These are syntactic locators, not a TLA+ evaluator, so a
+label can point at a conjunct that isn't actually the problem: an effect
+conjunct that *disables* the action rather than causing the bad transition
+(e.g. `x' \in {}`), a guard hidden inside an operator call rather than written
+out in the `/\` list, or a state the implementation never reaches because a
+`.cfg` `CONSTRAINT` prunes it from TLC's exploration. The diagnostic is a
+pointer to go read, not a verdict.
 
 **Rendering.** Colors only when stdout is a TTY, ANSI is enabled and `--json`
 is not set; otherwise plain text (tests render plain). TLA+ excerpts are not
