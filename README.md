@@ -139,24 +139,22 @@ Measured on `specs/TLCRunner.tla` (`mix outlaw.verify --seed 1..10`, default
   `--max-runs` below).
 - A missing watchdog (the owner's `:DOWN` no longer kills the OS process) is
   caught on 10 of 10 seeds, failing `internal_action_stalled` (pending
-  `Reap`) — `Reap` is the one internal action this spec marks fair, so the
-  end-of-run settle check requires it to happen.
-- A disabled state-limit kill is **not** caught by conformance on any of 10
-  seeds (0 of 10), because `LimitKill` is not marked fair in the spec:
-  nothing requires it to ever fire, so an implementation that never fires it
-  doesn't contradict the spec. The coverage report is what flags this
-  instead — `warning: never reached: LimitKill` plus a
-  `warning: N observed states never reached (first: ...)` line, which among
-  those N includes the `result = "too_many_states"` state. The text warning
-  only names a count and the first unreached state; the full list (including
-  that `too_many_states` state) is in `--json`'s
-  `coverage.states.unreached` — read coverage warnings rather than relying on
-  conformance pass/fail alone.
+  `Reap`) — the spec marks `Reap` fair, so settle points require it to happen.
+- A disabled state-limit kill is caught on 7 of 10 seeds at the default 100
+  runs, and on 10 of 10 at `--max-runs 300`, failing `internal_action_stalled`
+  (pending `LimitKill`) with the minimal trace `Start, Progress, Progress,
+  Progress`. This depends on the spec marking `LimitKill` fair
+  (`WF_vars(LimitKill)`). Before that was added, the same bug passed
+  conformance on 0 of 10 seeds, because an unfair internal action is never
+  required to fire; only the coverage report (`warning: never reached:
+  LimitKill`) hinted at it. The text warning names a count and the first
+  unreached state; the full list is in `--json`'s `coverage.states.unreached`.
+  Read coverage warnings rather than relying on conformance pass/fail alone.
 
-Raise `--max-runs` for specs where a missed-but-possible path matters; it
-won't help an unfair internal action that silently stops firing (above) —
-catching that needs a human decision (mark it fair in the spec, or add a
-dedicated assertion), not more runs. `--seed`, `--max-runs` and `--json` are
+Raise `--max-runs` for specs where a missed-but-possible path matters. It
+won't help an unfair internal action that silently stops firing: catching
+that needs a human decision (mark it fair in the spec, as was done for
+`LimitKill` here, or add a dedicated assertion), not more runs. `--seed`, `--max-runs` and `--json` are
 CLI options on `mix outlaw.verify`/`mix outlaw.test`; `settle_timeout` is not
 — it's set via `config :outlaw, settle_timeout: ...` — and `max_replays`
 (the post-shrink minimization pass's replay budget) isn't exposed by any mix
