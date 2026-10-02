@@ -45,12 +45,21 @@ defmodule Outlaw.Mapping.LocateTest do
              Locate.locate(Outlaw.Fixtures.LocateGuardedCatchAllActionSpec)
   end
 
+  test "a \"Inc\" = name match pattern first argument records \"Inc\", not \"*\"" do
+    assert %{action_lines: %{"Inc" => 45}} =
+             Locate.locate(Outlaw.Fixtures.LocateMatchPatternActionSpec)
+  end
+
+  test "a first argument that is neither a literal name, a match pattern, nor a plain variable/_ is skipped" do
+    assert Locate.locate(Outlaw.Fixtures.LocateSkippedPatternActionSpec).action_lines == %{}
+  end
+
   test "matches by arity, not just name: a same-named wrong-arity helper is ignored" do
     assert %{
-             init_line: 47,
-             actions_line: 48,
-             project_line: 50,
-             action_lines: %{"Inc" => 49}
+             init_line: 72,
+             actions_line: 73,
+             project_line: 75,
+             action_lines: %{"Inc" => 74}
            } = Locate.locate(Outlaw.Fixtures.LocateArityHelperSpec)
   end
 

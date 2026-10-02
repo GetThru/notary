@@ -34,6 +34,31 @@ defmodule Outlaw.Fixtures.LocateGuardedCatchAllActionSpec do
   def project(pid), do: %{"x" => Agent.get(pid, & &1)}
 end
 
+defmodule Outlaw.Fixtures.LocateMatchPatternActionSpec do
+  @moduledoc false
+  # Regression fixture: a `"Inc" = name` match pattern first argument still
+  # records the literal action name, not "*".
+  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+
+  def init, do: Agent.start_link(fn -> 0 end)
+  def actions, do: %{"Inc" => StreamData.constant(%{})}
+  def action("Inc" = name, _, pid) when is_binary(name), do: {:ok, pid}
+  def project(pid), do: %{"x" => Agent.get(pid, & &1)}
+end
+
+defmodule Outlaw.Fixtures.LocateSkippedPatternActionSpec do
+  @moduledoc false
+  # Regression fixture: a first argument pattern that is neither a literal
+  # name, a `"Name" = var` match, nor a plain variable/`_` (here, a tuple) is
+  # skipped entirely -- never recorded as "*".
+  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+
+  def init, do: Agent.start_link(fn -> 0 end)
+  def actions, do: %{"Inc" => StreamData.constant(%{})}
+  def action({:inc, _} = tag, _, pid), do: {:ok, tag, pid}
+  def project(pid), do: %{"x" => Agent.get(pid, & &1)}
+end
+
 defmodule Outlaw.Fixtures.LocateArityHelperSpec do
   @moduledoc false
   # Regression fixture: public helpers that share a callback's name but not

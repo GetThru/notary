@@ -128,12 +128,8 @@ defmodule Outlaw.Mapping.Locate do
     exprs
     |> Enum.reduce(%{}, fn expr, acc ->
       case action_def(expr) do
-        {:ok, first_arg, line} ->
-          key = if is_binary(first_arg), do: first_arg, else: "*"
-          Map.put_new(acc, key, line)
-
-        :error ->
-          acc
+        {:ok, key, line} -> Map.put_new(acc, key, line)
+        :error -> acc
       end
     end)
   end
@@ -142,7 +138,11 @@ defmodule Outlaw.Mapping.Locate do
     case def_signature(head) do
       {:action, _, args} when is_list(args) and length(args) == 3 ->
         [first_arg | _] = args
-        {:ok, first_arg, Keyword.get(meta, :line)}
+
+        case first_arg_key(first_arg) do
+          {:ok, key} -> {:ok, key, Keyword.get(meta, :line)}
+          :skip -> :error
+        end
 
       _ ->
         :error
@@ -150,4 +150,25 @@ defmodule Outlaw.Mapping.Locate do
   end
 
   defp action_def(_), do: :error
+
+  # The key recorded for `action/3`'s first argument:
+  #   - a string literal (`"Inc"`) -- that literal name;
+  #   - a `"Inc" = name` match pattern (either operand a literal, the other a
+  #     binding) -- the literal name, same as above;
+  #   - a plain variable or `_` -- `"*"` (matches any action name);
+  #   - anything else (a tuple, map, pin, literal of another type, ...) --
+  #     `:skip`: this locator doesn't try to interpret it, so no key is
+  #     recorded for it at all (never "*", which would wrongly claim it
+  #     matches every action).
+  defp first_arg_key(name) when is_binary(name), do: {:ok, name}
+
+  defp first_arg_key({:=, _meta, [left, right]}) do
+    with :skip <- literal_name(left), do: literal_name(right)
+  end
+
+  defp first_arg_key({name, _meta, ctx}) when is_atom(name) and is_atom(ctx), do: {:ok, "*"}
+  defp first_arg_key(_), do: :skip
+
+  defp literal_name(name) when is_binary(name), do: {:ok, name}
+  defp literal_name(_), do: :skip
 end
