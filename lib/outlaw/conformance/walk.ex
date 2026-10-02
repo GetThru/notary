@@ -171,13 +171,30 @@ defmodule Outlaw.Conformance.Walk do
   # successors, which together cover the same ground as exploring from the
   # whole closure at once, without recomputing it at every pop.
   defp bfs_parents(graph, closed_start, internal, external_actions) do
-    actions = Enum.sort(external_actions)
-    parents = Map.new(closed_start, &{&1, :root})
-    queue = :queue.from_list(closed_start)
-    bfs_parents_loop(graph, queue, parents, internal, actions)
+    bfs_parents(graph, closed_start, internal, external_actions, rank_map(graph))
   end
 
-  defp bfs_parents_loop(graph, queue, parents, internal, actions) do
+  # Same BFS, but taking a precomputed rank map (state id -> position in
+  # content order, see `rank_map/1`) instead of computing its own -- so a
+  # caller building many parent maps against the same graph (`generator/3`)
+  # pays for the content sort once, not per call.
+  #
+  # Every ordering choice the BFS makes is driven by `rank`, never raw ids:
+  # the initial frontier, each popped state's successors (per action), and
+  # the members of a freshly-discovered state's closure are all visited in
+  # rank order before being folded into the queue/parents accumulator. Ids
+  # are TLC fingerprints that change on every fresh TLC run, so without this
+  # the parent map built here -- and therefore which path `generator/3` picks
+  # whenever two equally-short paths exist -- would depend on those arbitrary
+  # ids instead of only on the graph's actual shape (item 1).
+  defp bfs_parents(graph, closed_start, internal, external_actions, rank) do
+    actions = Enum.sort(external_actions)
+    parents = Map.new(closed_start, &{&1, :root})
+    queue = closed_start |> by_rank(rank) |> :queue.from_list()
+    bfs_parents_loop(graph, queue, parents, internal, actions, rank)
+  end
+
+  defp bfs_parents_loop(graph, queue, parents, internal, actions, rank) do
     case :queue.out(queue) do
       {:empty, _} ->
         parents
@@ -187,19 +204,21 @@ defmodule Outlaw.Conformance.Walk do
           Enum.reduce(actions, {rest, parents}, fn action, {q, par} ->
             graph
             |> StateGraph.successors(state, action)
-            |> Enum.reduce({q, par}, &discover(graph, internal, state, action, &1, &2))
+            |> by_rank(rank)
+            |> Enum.reduce({q, par}, &discover(graph, internal, state, action, &1, &2, rank))
           end)
 
-        bfs_parents_loop(graph, new_queue, new_parents, internal, actions)
+        bfs_parents_loop(graph, new_queue, new_parents, internal, actions, rank)
     end
   end
 
-  defp discover(graph, internal, from, action, target, {queue, parents}) do
+  defp discover(graph, internal, from, action, target, {queue, parents}, rank) do
     if Map.has_key?(parents, target) do
       {queue, parents}
     else
       graph
       |> closure([target], internal)
+      |> by_rank(rank)
       |> Enum.reduce({queue, parents}, fn alias_state, {q, par} ->
         if Map.has_key?(par, alias_state) do
           {q, par}
@@ -208,6 +227,28 @@ defmodule Outlaw.Conformance.Walk do
         end
       end)
     end
+  end
+
+  # Content-order sort for a list of state ids, given a precomputed rank map
+  # (see `rank_map/1`). Ties (equal state content under different ids, which
+  # TLC should never actually produce as distinct states) fall back to
+  # whatever relative order the list already had -- `Enum.sort_by/2` is
+  # stable -- rather than to the ids themselves.
+  defp by_rank(ids, rank), do: Enum.sort_by(ids, &Map.fetch!(rank, &1))
+
+  # Maps every state id in `graph` to its position in content order (`Enum.
+  # sort_by(ids, &StateGraph.state(graph, &1))`) -- a total order over ids
+  # driven entirely by the states' own variable assignments, never by the
+  # (TLC-fingerprint, arbitrary-per-run) ids themselves. Computed once per
+  # `generator/3` build and threaded through every ordering decision that
+  # would otherwise depend on id order (item 1).
+  @spec rank_map(StateGraph.t()) :: %{StateGraph.state_id() => non_neg_integer()}
+  defp rank_map(graph) do
+    graph.states
+    |> Map.keys()
+    |> Enum.sort_by(&StateGraph.state(graph, &1))
+    |> Enum.with_index()
+    |> Map.new()
   end
 
   # Walks parent pointers backward from `state`, prepending each action as it
@@ -241,12 +282,16 @@ defmodule Outlaw.Conformance.Walk do
     external_actions = actions |> Map.keys() |> Enum.sort()
     allowed_actions = MapSet.new(external_actions ++ internal)
     closed_initial = closure(graph, StateGraph.initial_states(graph), internal)
-    parents = bfs_parents(graph, closed_initial, internal, external_actions)
+    rank = rank_map(graph)
+    parents = bfs_parents(graph, closed_initial, internal, external_actions, rank)
 
     entries =
       graph
       |> StateGraph.edges()
       |> Enum.filter(fn {_from, action, _to} -> MapSet.member?(allowed_actions, action) end)
+      |> Enum.sort_by(fn {from, action, to} ->
+        {Map.fetch!(rank, from), action, Map.fetch!(rank, to)}
+      end)
       |> Enum.map(fn {from, action, _to} -> {reconstruct_path(parents, from), action} end)
       |> Enum.reject(fn {path, _action} -> is_nil(path) end)
 

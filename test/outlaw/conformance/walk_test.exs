@@ -45,6 +45,43 @@ defmodule Outlaw.Conformance.WalkTest do
 
   defp action_names(steps), do: steps |> Enum.filter(&is_tuple/1) |> Enum.map(&elem(&1, 0))
 
+  # Rebuilds `graph` with every state id run through a bijection, per item 1's
+  # reproducibility requirement -- state ids are TLC fingerprints, which
+  # change on every fresh TLC run (TLC picks a random fingerprint
+  # polynomial), so a given `--seed` must generate the identical sequence
+  # regardless of which arbitrary ids the graph happens to carry.
+  # `states`, `edges` and `initial` are all rebuilt through the same mapping.
+  #
+  # Deliberately *reverses* the ids' own sort order (rather than e.g.
+  # prefixing every id with a constant string, which preserves the original
+  # ids' relative lexicographic order and so would never catch an id-ordered
+  # bug): fresh, fixed-width "n<<number>>" ids assigned to the original ids
+  # taken in reverse sorted order, so any leftover ordering-by-id (instead of
+  # by state content) flips the generated sequence instead of matching it.
+  defp relabel(graph) do
+    sorted_ids = graph.states |> Map.keys() |> Enum.sort()
+    width = sorted_ids |> length() |> Integer.to_string() |> String.length()
+
+    new_labels =
+      0..(length(sorted_ids) - 1)
+      |> Enum.map(&("n" <> String.pad_leading(Integer.to_string(&1), width, "0")))
+      |> Enum.reverse()
+
+    idmap = Map.new(Enum.zip(sorted_ids, new_labels))
+    relabel_id = &Map.fetch!(idmap, &1)
+
+    states = Map.new(graph.states, fn {id, vars} -> {relabel_id.(id), vars} end)
+
+    edges =
+      Map.new(graph.edges, fn {{from, action}, targets} ->
+        {{relabel_id.(from), action}, Enum.map(targets, relabel_id)}
+      end)
+
+    initial = Enum.map(graph.initial, relabel_id)
+
+    %{graph | states: states, edges: edges, initial: initial}
+  end
+
   # Fraction of {"Request", _} occurrences immediately followed by :settle,
   # across all values (not just the first occurrence in each value).
   defp settle_after_request_rate(values) do
@@ -329,6 +366,53 @@ defmodule Outlaw.Conformance.WalkTest do
       rate = gen |> values(300) |> settle_after_request_rate()
 
       assert rate < 0.15
+    end
+  end
+
+  describe "canonical ordering: --seed reproducibility across graph rebuilds (item 1)" do
+    # State ids are TLC fingerprints, which change on every fresh TLC run (TLC
+    # picks a random fingerprint polynomial) -- but the *structure* of the
+    # graph (which states, which edges, which labels) is the same. A given
+    # `--seed` must therefore generate the identical sequence of values
+    # whether or not the ids happen to be relabelled, which means every
+    # ordering decision `Walk.generator/3` makes along the way (the `entries`
+    # list, BFS start/frontier/successors/closure) must be driven by state
+    # *content*, never by the ids themselves.
+    test "Counter: relabelled ids give identical generated values for the same seed" do
+      graph = Fixtures.graph("Counter")
+      relabelled = relabel(graph)
+      actions = CounterSpec.actions()
+
+      assert values(Walk.generator(graph, actions, []), 50, 7) ==
+               values(Walk.generator(relabelled, actions, []), 50, 7)
+    end
+
+    test "Bank: relabelled ids give identical generated values for the same seed" do
+      graph = Fixtures.graph("Bank")
+      relabelled = relabel(graph)
+      actions = BankSpec.actions()
+
+      assert values(Walk.generator(graph, actions, []), 50, 7) ==
+               values(Walk.generator(relabelled, actions, []), 50, 7)
+    end
+
+    test "Workflow: relabelled ids give identical generated values for the same seed" do
+      graph = Fixtures.graph("Workflow")
+      relabelled = relabel(graph)
+      actions = WorkflowSpec.actions()
+
+      assert values(Walk.generator(graph, actions, []), 50, 7) ==
+               values(Walk.generator(relabelled, actions, []), 50, 7)
+    end
+
+    test "Async: relabelled ids give identical generated values for the same seed" do
+      graph = Fixtures.graph("Async")
+      relabelled = relabel(graph)
+      actions = AsyncSpec.actions()
+      opts = [internal: ["Complete"], fair: MapSet.new(["Complete"])]
+
+      assert values(Walk.generator(graph, actions, opts), 50, 7) ==
+               values(Walk.generator(relabelled, actions, opts), 50, 7)
     end
   end
 
