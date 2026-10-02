@@ -278,22 +278,40 @@ generator: uniform picks from `actions/0`, no `:settle` points).
   `P := closure(initial)`; after emitting action `a`,
   `P := closure(successors(P, a))`, or `P` unchanged if `a` is enabled nowhere in
   `P` (the implementation must reject it).
-- **Target.** Each generated value first picks a transition `(s, a, t)`
-  uniformly among all graph edges (internal ones included) and emits the
-  shortest external-action path from `closure(initial)` to `s` (BFS over the
-  graph; paths cached per graph and target), then `a` if external, or a
-  `:settle` point if `a` is internal.
+- **Target.** About half of the generated values are targeted (a `targeted?`
+  boolean that shrinks to `false`, dropping the prefix entirely). A targeted
+  value picks a transition `(s, a, t)` uniformly among the eligible edges —
+  every graph edge whose action is declared external (an `actions/0` key) or
+  internal, and whose source `s` is reachable from `closure(initial)` by some
+  external-action path — and emits that shortest path, then `a` if external,
+  or a `:settle` point if `a` is internal. If the value's token list is
+  shorter than the path needs (e.g. after shrinking), the prefix is simply cut
+  to however many tokens are available, same as running out of `max_steps`.
+  All paths come from a single BFS (parent-pointer map) run once per
+  generator build, not one search per target. If there is no eligible edge at
+  all, every value is pure continuation (below), untargeted.
 - **Continue.** Then a random walk up to `max_steps`: ~80% an action enabled
-  somewhere in `P` (uniform), ~15% an action disabled everywhere in `P` (guard
-  testing), ~5% a `:settle` point — 50% immediately after a step that makes a
-  fair internal action enabled somewhere in `P`.
+  somewhere in `P` (uniform; falls back to the disabled bucket if none is
+  enabled), ~15% an action disabled everywhere in `P` (guard testing; falls
+  back to the enabled bucket if none is disabled), ~5% a `:settle` point (both
+  buckets empty falls back to `:settle` too). After emitting an action, a
+  fair-internal-action bias can force the *next* item to `:settle`: if that
+  action's direct, pre-closure successors in `P` include a state where some
+  fair internal action is enabled (ignoring self-loops), the next token's own
+  50/50 settle-bias roll gets a chance to force `:settle` in place of its
+  normal choice.
 - **Params.** Every emitted action takes a value from its `actions/0` params
   generator. The walk cannot choose params that lead to a particular edge, so
   for parameterised actions targeting is by action name only.
 - **Reproducibility and shrinking.** All randomness is StreamData's, so `--seed`
   reproduces the sequences; a value is a plain list of steps and `:settle`
   points and shrinks like any list (removing steps may turn later actions into
-  disabled ones, which still test guards). Because each generated step is
+  disabled ones, which still test guards). State ids are TLC fingerprints that
+  change on every fresh TLC run (TLC picks a random fingerprint polynomial),
+  so every ordering decision the walk makes — the eligible-edge list, the
+  BFS's frontier/successors/closure traversal — is sorted by state *content*,
+  never by id, so that `--seed` reproduces the same sequence across graph
+  rebuilds, not just within one. Because each generated step is
   chosen relative to the walk's possible set, StreamData deleting one step can
   reinterpret every later one, so its shrinking can stop at a long trace.
   After StreamData has shrunk a failure, the runner therefore minimizes the
@@ -321,9 +339,13 @@ check reports its failure instead; a passing check never shrinks, so every
 counted execution is an original run):
 
 - **Actions** — an external action is reached when a step accepted it. An
-  internal action is reached when, after a step or settle, no new candidate
-  lies in the set reachable without internal steps; every internal edge into
-  the new candidates from that closure then counts.
+  internal action is credited per step (after the initial one): let `C_prev`
+  be the previous step's candidates and `E := successors(closure(C_prev), a)`
+  if this step accepted an external action `a`, or `E := C_prev` if this step
+  is a `(settle)` step or was rejected. If this step's candidates are disjoint
+  from `E` (the implementation could only have gotten here via one or more
+  internal actions), every internal action labelling an edge `(u, a, t)` with
+  `u` in `closure(E)` and `t` in this step's candidates counts as reached.
 - **Observed states** — distinct projections seen in steps, out of the distinct
   projections (on the observed variables) of all graph states.
 - **Observed transitions** — distinct `(projection before, action, projection
