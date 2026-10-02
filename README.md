@@ -8,6 +8,10 @@ Outlaw then proves the implementation behaves like the spec, by driving it
 through generated action sequences and checking every step against the spec's
 full state graph.
 
+New to Outlaw? Start with the
+[Getting Started: Hello, World](guides/getting-started.md) guide, which goes
+from `mix new` to a verified feature in a few minutes.
+
 ## Install
 
 ```elixir

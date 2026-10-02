@@ -13,7 +13,9 @@ defmodule Outlaw.MixProject do
       deps: deps(),
       test_ignore_filters: [~r{^test/fixtures/}],
       description:
-        "TLA+ specifications as the contract between humans and LLMs for Elixir projects."
+        "TLA+ specifications as the contract between humans and LLMs for Elixir projects.",
+      name: "Outlaw",
+      docs: docs()
     ]
   end
 
@@ -27,6 +29,17 @@ defmodule Outlaw.MixProject do
   defp elixirc_paths(_), do: ["lib"]
 
   defp deps do
-    [{:stream_data, "~> 1.1"}]
+    [
+      {:stream_data, "~> 1.1"},
+      {:ex_doc, "~> 0.40", only: :dev, runtime: false}
+    ]
+  end
+
+  defp docs do
+    [
+      main: "readme",
+      extras: ["README.md", "guides/getting-started.md"],
+      groups_for_extras: [Guides: ~r{^guides/}]
+    ]
   end
 end
