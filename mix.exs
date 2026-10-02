@@ -31,6 +31,7 @@ defmodule Outlaw.MixProject do
   defp deps do
     [
       {:stream_data, "~> 1.1"},
+      {:pentiment, "~> 0.2"},
       {:ex_doc, "~> 0.40", only: :dev, runtime: false}
     ]
   end

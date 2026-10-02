@@ -91,19 +91,50 @@ defmodule Outlaw.Spec do
   def fair_actions(%__MODULE__{tla_path: tla_path}) do
     tla_path
     |> File.read!()
-    |> strip_block_comments()
-    |> strip_line_comments()
+    |> strip_comments()
     |> then(&Regex.scan(@fairness, &1))
     |> Enum.map(fn [_, name] -> name end)
     |> MapSet.new()
   end
 
-  defp strip_block_comments(text), do: Regex.replace(~r/\(\*.*?\*\)/s, text, "")
+  @doc """
+  Strips TLA comments (`\\* ...` to end of line, and `(* ... *)` blocks, which
+  may span lines) from `text`, replacing their characters with spaces rather
+  than deleting them. Every character that isn't part of a comment keeps its
+  original line and column, so callers that need source positions (such as
+  `Outlaw.Spec.Locate`) can scan the result directly. Shared with
+  `fair_actions/1` so there is one comment-stripping implementation.
+  """
+  @spec strip_comments(String.t()) :: String.t()
+  def strip_comments(text) do
+    text
+    |> strip_block_comments()
+    |> strip_line_comments()
+  end
+
+  defp strip_block_comments(text) do
+    Regex.replace(~r/\(\*.*?\*\)/s, text, fn comment ->
+      comment
+      |> String.graphemes()
+      |> Enum.map(fn
+        "\n" -> "\n"
+        _ -> " "
+      end)
+      |> Enum.join()
+    end)
+  end
 
   defp strip_line_comments(text) do
     text
     |> String.split("\n")
-    |> Enum.map_join("\n", &(&1 |> String.split("\\*") |> hd()))
+    |> Enum.map_join("\n", &blank_line_comment/1)
+  end
+
+  defp blank_line_comment(line) do
+    case String.split(line, "\\*", parts: 2) do
+      [before, comment] -> before <> String.duplicate(" ", String.length(comment) + 2)
+      [before] -> before
+    end
   end
 
   defp new(tla, cfg) do
