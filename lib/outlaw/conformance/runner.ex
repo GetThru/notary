@@ -455,9 +455,44 @@ defmodule Outlaw.Conformance.Runner do
 
     result
   rescue
-    e -> {:fail, :exception, %{exception: Exception.format(:error, e, __STACKTRACE__)}}
+    e ->
+      details = %{exception: Exception.format(:error, e, __STACKTRACE__)}
+      details = put_frame(details, __STACKTRACE__)
+      {:fail, :exception, details}
   catch
     {:outlaw_fail, kind, details} -> {:fail, kind, details}
+  end
+
+  # The top stack frame that's inside the user's project (not Elixir/OTP
+  # internals or a dependency), kept raw as `{file, line}` so
+  # `Outlaw.Diagnostic` can point at the exact raising line (design spec
+  # §9.1's `exception` row) without re-parsing the formatted exception text.
+  # `nil` (no matching frame) means the diagnostic simply can't locate it.
+  defp put_frame(details, stacktrace) do
+    case top_project_frame(stacktrace) do
+      nil -> details
+      frame -> Map.put(details, :frame, frame)
+    end
+  end
+
+  defp top_project_frame(stacktrace) do
+    Enum.find_value(stacktrace, fn
+      {_m, _f, _a, meta} when is_list(meta) ->
+        case meta[:file] do
+          nil -> nil
+          file -> frame_if_in_project(to_string(file), meta[:line])
+        end
+
+      _ ->
+        nil
+    end)
+  end
+
+  defp frame_if_in_project(file, line) do
+    if not String.starts_with?(file, "deps/") and String.ends_with?(file, ".ex") and
+         File.exists?(file) do
+      {file, line}
+    end
   end
 
   defp init_ctx(m, notify) do

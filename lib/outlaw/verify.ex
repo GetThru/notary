@@ -17,11 +17,13 @@ defmodule Outlaw.Verify do
 
   @spec check_spec(Spec.t(), keyword()) :: Report.spec_result()
   def check_spec(%Spec{} = spec, opts \\ []) do
+    extra = %{spec: spec}
+
     stage =
       case TLC.check(spec, Keyword.take(opts, @graph_opts)) do
-        {:ok, stats} -> stage(:check, :pass, {:ok, stats})
-        {:violation, v} -> stage(:check, :fail, {:violation, v})
-        {:error, error} -> stage(:check, :error, {:error, error})
+        {:ok, stats} -> stage(:check, :pass, {:ok, stats}, extra)
+        {:violation, v} -> stage(:check, :fail, {:violation, v}, extra)
+        {:error, error} -> stage(:check, :error, {:error, error}, extra)
       end
 
     spec_result(spec.name, [stage])
@@ -29,16 +31,27 @@ defmodule Outlaw.Verify do
 
   @spec test_spec(Spec.t(), %{String.t() => module()}, keyword()) :: Report.spec_result()
   def test_spec(%Spec{} = spec, mappings, opts \\ []) do
+    check_extra = %{spec: spec}
+
     stages =
       case TLC.graph(spec, Keyword.take(opts, @graph_opts)) do
         {:ok, graph, stats} ->
-          [stage(:check, :pass, {:ok, stats}), conformance_stage(spec, graph, mappings, opts)]
+          [
+            stage(:check, :pass, {:ok, stats}, check_extra),
+            conformance_stage(spec, graph, mappings, opts)
+          ]
 
         {:violation, v} ->
-          [stage(:check, :fail, {:violation, v}), stage(:conformance, :skipped, :skipped)]
+          [
+            stage(:check, :fail, {:violation, v}, check_extra),
+            stage(:conformance, :skipped, :skipped)
+          ]
 
         {:error, error} ->
-          [stage(:check, :error, {:error, error}), stage(:conformance, :skipped, :skipped)]
+          [
+            stage(:check, :error, {:error, error}, check_extra),
+            stage(:conformance, :skipped, :skipped)
+          ]
       end
 
     spec_result(spec.name, stages)
@@ -47,12 +60,13 @@ defmodule Outlaw.Verify do
   defp conformance_stage(spec, graph, mappings, opts) do
     case Map.fetch(mappings, spec.name) do
       :error ->
-        stage(:conformance, :fail, {:error, missing_mapping(spec)}, %{internal: [], fair: []})
+        extra = %{internal: [], fair: [], spec: spec, mapping: nil}
+        stage(:conformance, :fail, {:error, missing_mapping(spec)}, extra)
 
       {:ok, module} ->
         internal = Conformance.internal_actions(module)
         fair = Conformance.fair_internal_actions(module)
-        extra = %{internal: internal, fair: fair}
+        extra = %{internal: internal, fair: fair, spec: spec, mapping: module}
 
         case Conformance.check(module, graph, Keyword.take(opts, @conformance_opts)) do
           {:ok, summary} ->

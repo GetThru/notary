@@ -141,6 +141,32 @@ defmodule Outlaw.ReportTest do
     assert text =~ "mix outlaw.graph Bank --trace failure"
   end
 
+  @old_failure_text """
+  Conformance failure in Bank: action_not_enabled (seed 1234)
+  The implementation accepted an action the spec does not allow in this state. It should have returned {:rejected, reason, ctx}.
+
+    step  action / params / outcome / implementation state
+    0     (init)            ok          balance = 0
+    1     Withdraw %{a: 1}  ok          balance = -1   <-- diverges here
+
+  Spec allowed: (no Withdraw transition is enabled here)
+
+  Reproduce: mix outlaw.test Bank --seed 1234
+  Visualize: mix outlaw.graph Bank --trace failure --open\
+  """
+
+  test "format_failure/2 (no context) renders exactly today's plain text -- captured before pentiment diagnostics existed" do
+    assert Report.format_failure("Bank", @failure) == @old_failure_text
+  end
+
+  test "format_failure/3 with a context that can't locate a source renders exactly the same text" do
+    unlocatable_spec = Outlaw.Spec.from_path("test/fixtures/specs/NoSuchSpec.tla")
+
+    text = Report.format_failure("Bank", @failure, spec: unlocatable_spec, mapping: nil)
+
+    assert text == @old_failure_text
+  end
+
   test "format_failure renders a (settle) step without trailing params when params is nil" do
     failure = %Failure{
       kind: :internal_action_stalled,
@@ -389,6 +415,36 @@ defmodule Outlaw.ReportTest do
     assert text =~ "check: pass (8 distinct states)"
     assert text =~ "conformance: fail"
     assert text =~ "<-- diverges here"
+  end
+
+  test "a conformance stage carrying spec/mapping context renders the diagnostic before the legacy text" do
+    counter_spec = Outlaw.Spec.from_path("test/fixtures/specs/Counter.tla")
+
+    {:error, failure} =
+      Outlaw.Conformance.check(
+        Outlaw.Fixtures.CounterNoGuardSpec,
+        Outlaw.Fixtures.graph("Counter"),
+        seed: 42,
+        max_runs: 200
+      )
+
+    text =
+      report([
+        %{
+          stage: :conformance,
+          status: :fail,
+          payload: {:error, failure},
+          internal: [],
+          fair: [],
+          spec: counter_spec,
+          mapping: Outlaw.Fixtures.CounterNoGuardSpec
+        }
+      ])
+      |> Report.format()
+
+    assert text =~ "error[action_not_enabled]"
+    assert text =~ "test/fixtures/specs/Counter.tla:10:8"
+    assert text =~ "Conformance failure in Bank: action_not_enabled"
   end
 
   test "to_json is encodable and structured for LLMs" do

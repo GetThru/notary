@@ -17,7 +17,12 @@ defmodule Outlaw.Report do
   # -- text -------------------------------------------------------------------
 
   @spec format(report()) :: String.t()
-  def format(%{lock: lock, specs: specs, status: status}) do
+  @spec format(report(), keyword()) :: String.t()
+  def format(report, opts \\ [])
+
+  def format(%{lock: lock, specs: specs, status: status}, opts) do
+    colors = Keyword.get(opts, :colors, false)
+
     lock_text =
       case lock do
         nil -> []
@@ -25,7 +30,7 @@ defmodule Outlaw.Report do
         %{payload: {:error, %Error{} = e}} -> ["lock: FAIL", indent(e.message)]
       end
 
-    spec_texts = Enum.map(specs, &format_spec/1)
+    spec_texts = Enum.map(specs, &format_spec(&1, colors))
 
     summary =
       if status == :pass, do: "Outlaw: all checks passed.", else: "Outlaw: verification FAILED."
@@ -33,19 +38,20 @@ defmodule Outlaw.Report do
     Enum.join(lock_text ++ spec_texts ++ [summary], "\n\n")
   end
 
-  defp format_spec(%{spec: name, status: status, stages: stages}) do
+  defp format_spec(%{spec: name, status: status, stages: stages}, colors) do
     header = "#{name}: #{if status == :pass, do: "pass", else: "FAIL"}"
-    Enum.join([header | Enum.map(stages, &format_stage(name, &1))], "\n")
+    Enum.join([header | Enum.map(stages, &format_stage(name, &1, colors))], "\n")
   end
 
-  defp format_stage(_name, %{stage: :check, payload: {:ok, stats}}),
+  defp format_stage(_name, %{stage: :check, payload: {:ok, stats}}, _colors),
     do: "  check: pass (#{stats.distinct_states} distinct states)"
 
-  defp format_stage(_name, %{stage: stage, status: :skipped}), do: "  #{stage}: skipped"
+  defp format_stage(_name, %{stage: stage, status: :skipped}, _colors), do: "  #{stage}: skipped"
 
   defp format_stage(
          _name,
-         %{stage: :conformance, payload: {:ok, %{runs: runs, seed: seed} = payload}} = stage
+         %{stage: :conformance, payload: {:ok, %{runs: runs, seed: seed} = payload}} = stage,
+         _colors
        ) do
     header = "  conformance: pass (#{runs} runs, seed #{seed}#{internal_suffix(stage)})"
 
@@ -55,15 +61,22 @@ defmodule Outlaw.Report do
     end
   end
 
-  defp format_stage(name, %{stage: stage, status: status, payload: payload}) do
+  defp format_stage(name, %{stage: stage, status: status, payload: payload} = stage_map, colors) do
     body =
       case payload do
         {:violation, v} -> format_violation(name, v)
-        {:error, %Failure{} = f} -> format_failure(name, f)
+        {:error, %Failure{} = f} -> format_failure(name, f, stage_context(stage_map, colors))
         {:error, %Error{} = e} -> format_error(e)
       end
 
     "  #{stage}: #{status}\n" <> indent(body, 4)
+  end
+
+  defp stage_context(stage_map, colors) do
+    stage_map
+    |> Map.take([:spec, :mapping])
+    |> Map.to_list()
+    |> Keyword.put(:colors, colors)
   end
 
   # Shows the mapping's declared internal actions on a conformance stage, with
@@ -137,8 +150,32 @@ defmodule Outlaw.Report do
 
   defp detail_block(_label, _text), do: nil
 
-  @spec format_failure(String.t(), Failure.t()) :: String.t()
-  def format_failure(spec_name, %Failure{} = f) do
+  @spec format_failure(String.t(), Failure.t(), keyword()) :: String.t()
+  def format_failure(spec_name, %Failure{} = f, context \\ []) do
+    legacy = legacy_failure_text(spec_name, f)
+
+    case diagnostic_text(f, context) do
+      nil -> legacy
+      diagnostic -> diagnostic <> "\n\n" <> legacy
+    end
+  end
+
+  defp diagnostic_text(f, context) do
+    case Keyword.get(context, :spec) do
+      nil ->
+        nil
+
+      spec ->
+        colors = Keyword.get(context, :colors, false)
+        mapping = Keyword.get(context, :mapping)
+
+        f
+        |> Outlaw.Diagnostic.failure(spec: spec, mapping: mapping)
+        |> Outlaw.Diagnostic.render(colors: colors)
+    end
+  end
+
+  defp legacy_failure_text(spec_name, %Failure{} = f) do
     last = List.last(f.steps)
     rows = Enum.map(f.steps, &step_row(&1, &1 == last))
     width = rows |> Enum.map(fn {_, a, _, _, _} -> String.length(a) end) |> Enum.max(fn -> 6 end)
@@ -160,7 +197,11 @@ defmodule Outlaw.Report do
           ["Spec allowed: " <> Enum.map_join(allowed, " | ", &format_state/1)]
       end
 
-    details = f.details |> Map.drop([:during]) |> Enum.map(fn {k, v} -> "#{k}: #{detail(v)}" end)
+    details =
+      f.details
+      |> Map.drop([:during, :frame])
+      |> Enum.map(fn {k, v} -> "#{k}: #{detail(v)}" end)
+
     during = if f.details[:during], do: ["During: #{f.details.during}"], else: []
     seed = if f.seed, do: " (seed #{f.seed})", else: ""
 
