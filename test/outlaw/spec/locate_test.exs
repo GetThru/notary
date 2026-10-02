@@ -92,9 +92,9 @@ defmodule Outlaw.Spec.LocateTest do
       assert g2.text == "/\\ gateway = \"up\""
       assert effect.kind == :effect
       assert effect.text == "/\\ status' = [status EXCEPT ![u] = \"paid\"]"
-      # Syntactic classification only: UNCHANGED has no literal prime, so it
-      # reads as a guard even though it is semantically an effect.
-      assert g3.kind == :guard
+      # UNCHANGED has no literal prime, but it is semantically an effect (it
+      # constrains gateway' = gateway) -- classified as one.
+      assert g3.kind == :effect
       assert g3.text == "/\\ UNCHANGED gateway"
     end
 
@@ -113,7 +113,7 @@ defmodule Outlaw.Spec.LocateTest do
       assert c3.text == "/\\ os' = \"exited\""
       assert c4.kind == :effect
       assert c4.text == "/\\ result' = IF caller = \"alive\" THEN \"ok\" ELSE result"
-      assert c5.kind == :guard
+      assert c5.kind == :effect
       assert c5.text == "/\\ UNCHANGED <<caller, seen>>"
 
       for c <- conjuncts, do: assert(c.column == 9)

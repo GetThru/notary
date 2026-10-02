@@ -310,6 +310,7 @@ defmodule Outlaw.Spec.Locate do
   end
 
   @string_literal_re ~r/"[^"]*"/
+  @unchanged_re ~r/\bUNCHANGED\b/
 
   defp classify(text) do
     # A `'` inside a string literal (e.g. `/\ msg = "don't"`) isn't a primed
@@ -317,7 +318,12 @@ defmodule Outlaw.Spec.Locate do
     cleaned =
       Regex.replace(@string_literal_re, text, fn s -> String.duplicate(" ", String.length(s)) end)
 
-    if Regex.match?(@prime_re, cleaned), do: :effect, else: :guard
+    # `UNCHANGED x` has no literal prime but is semantically an effect (it
+    # constrains x' = x) -- treat it as one so a diagnostic pointing at "what
+    # changed" includes it.
+    if Regex.match?(@prime_re, cleaned) or Regex.match?(@unchanged_re, cleaned),
+      do: :effect,
+      else: :guard
   end
 
   defp slice_span(lines, start_idx, start_col, end_idx, end_col) when start_idx == end_idx do

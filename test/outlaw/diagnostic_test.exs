@@ -22,6 +22,7 @@ defmodule Outlaw.DiagnosticTest do
 
   @counter_spec Spec.from_path("test/fixtures/specs/Counter.tla")
   @async_spec Spec.from_path("test/fixtures/specs/Async.tla")
+  @workflow_spec Spec.from_path("test/fixtures/specs/Workflow.tla")
 
   defp check(module, graph_name, opts) do
     Conformance.check(
@@ -240,6 +241,82 @@ defmodule Outlaw.DiagnosticTest do
     assert text =~ "/\\ x' = x + 1"
     assert text =~ "/\\ y' = y + 1"
     assert text =~ "note: spec allowed: x = 1, y = 1"
+  end
+
+  test "illegal_transition on Ship(u): UNCHANGED gateway is labelled as an effect when the implementation changes it" do
+    failure = %Failure{
+      kind: :illegal_transition,
+      seed: 1,
+      steps: [
+        %Step{
+          index: 0,
+          outcome: :ok,
+          projection: %{"status" => "paid", "gateway" => "up"},
+          allowed: [%{"status" => "paid", "gateway" => "up"}]
+        },
+        %Step{
+          index: 1,
+          action: "Ship",
+          outcome: :ok,
+          projection: %{"status" => "shipped", "gateway" => "down"},
+          allowed: []
+        }
+      ]
+    }
+
+    text =
+      failure
+      |> Diagnostic.failure(spec: @workflow_spec, mapping: nil)
+      |> Diagnostic.render(colors: false)
+
+    assert text =~ "error[illegal_transition]"
+    assert text =~ "Ship reached a state the spec doesn't allow"
+    assert text =~ "/\\ status' = [status EXCEPT ![u] = \"shipped\"]"
+    assert text =~ "/\\ UNCHANGED gateway"
+    # Both effect conjuncts are labelled, including the one under UNCHANGED
+    # (classified as an effect, not a guard -- item 2).
+    assert length(
+             :binary.matches(
+               text,
+               ~s(implementation reached gateway = "down", status = "shipped")
+             )
+           ) == 2
+  end
+
+  test "action_not_enabled on Ship(u): only the real guard is labelled, UNCHANGED gateway is not a guard" do
+    failure = %Failure{
+      kind: :action_not_enabled,
+      seed: 1,
+      steps: [
+        %Step{
+          index: 0,
+          outcome: :ok,
+          projection: %{"status" => "cart", "gateway" => "up"},
+          allowed: [%{"status" => "cart", "gateway" => "up"}]
+        },
+        %Step{
+          index: 1,
+          action: "Ship",
+          outcome: :ok,
+          projection: %{"status" => "cart", "gateway" => "up"},
+          allowed: []
+        }
+      ]
+    }
+
+    text =
+      failure
+      |> Diagnostic.failure(spec: @workflow_spec, mapping: nil)
+      |> Diagnostic.render(colors: false)
+
+    assert text =~ "error[action_not_enabled]"
+    assert text =~ "/\\ status[u] = \"paid\""
+    # Exactly one guard conjunct in Ship(u) -- a single "false here" label
+    # (not the several-guards "one of these" wording), and the UNCHANGED
+    # gateway effect conjunct gets no label of its own.
+    assert length(
+             :binary.matches(text, ~s(╰── false here: gateway = "up", status = "cart"))
+           ) == 1
   end
 
   test "invalid_mapping points at the use Outlaw.Conformance line, def actions as secondary, help from the error" do
