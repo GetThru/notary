@@ -132,7 +132,11 @@ Measured on `specs/TLCRunner.tla` (`mix outlaw.verify --seed 1..10`, default
 100 runs, `generation: :walk`):
 
 - All 6 external actions plus both internal ones (`LimitKill`, `Reap`) are
-  reached on 10 of 10 seeds (`coverage: actions 8/8`).
+  reached on 9 of 10 seeds (`coverage: actions 8/8`); one seed (8) misses
+  `LimitKill` at the default 100 runs (`coverage: actions 7/8`,
+  `warning: never reached: LimitKill`) — a rare-but-possible miss the
+  coverage report surfaces rather than a conformance failure (see
+  `--max-runs` below).
 - A missing watchdog (the owner's `:DOWN` no longer kills the OS process) is
   caught on 10 of 10 seeds, failing `internal_action_stalled` (pending
   `Reap`) — `Reap` is the one internal action this spec marks fair, so the

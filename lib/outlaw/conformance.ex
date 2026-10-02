@@ -35,7 +35,7 @@ defmodule Outlaw.Conformance do
     * `:generation`: `:walk` (default) generates sequences by walking the
       spec's state graph (`Outlaw.Conformance.Walk`, design spec §5.1);
       `:uniform` keeps the Phase 1 generator (uniform picks from `actions/0`,
-      no `:settle` points) — measured about 1.5-1.7x faster per run on
+      no `:settle` points) — measured about 1.4-1.7x faster per run on
       Outlaw's own `specs/TLCRunner.tla`, useful as a baseline. Anything else
       fails validation (`:invalid_mapping`).
 
