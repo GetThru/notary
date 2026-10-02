@@ -19,5 +19,9 @@ defmodule Outlaw.CLITest do
     test "off: --json, even if ANSI is enabled and columns are known" do
       assert CLI.colors?(true, {:ok, 80}, true) == false
     end
+
+    test "on: json? is nil (the --json flag was never passed, not just false)" do
+      assert CLI.colors?(true, {:ok, 80}, nil) == true
+    end
   end
 end

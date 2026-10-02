@@ -98,6 +98,6 @@ defmodule Outlaw.CLI do
   @doc false
   @spec colors?(boolean(), {:ok, pos_integer()} | {:error, term()}, boolean() | nil) :: boolean()
   def colors?(ansi_enabled?, columns_result, json?) do
-    not json? and ansi_enabled? and match?({:ok, _}, columns_result)
+    !json? and ansi_enabled? and match?({:ok, _}, columns_result)
   end
 end
