@@ -113,13 +113,34 @@ defmodule Outlaw.DiagnosticTest do
     assert text =~ "note: ** (RuntimeError) boom"
   end
 
-  test "timeout points at the matching def action clause, with a softer message when settling" do
+  test "timeout points at the matching def action clause" do
     text = render(Fixtures.CounterSlowSpec, "Counter", action_timeout: 50, max_runs: 20)
 
     assert text =~ "error[timeout]"
     assert text =~ "action/3 Inc didn't return within 50 ms"
     assert text =~ "test/support/fixtures/counter_specs.ex"
     assert text =~ "def action(\"Inc\", _, pid) do"
+  end
+
+  test "timeout during settling points at def project, with a softer message than \"timed out here\"" do
+    failure = %Failure{
+      kind: :timeout,
+      seed: 1,
+      steps: [%Step{index: 0, outcome: :ok, projection: %{"x" => 0}, allowed: [%{"x" => 0}]}],
+      details: %{during: "settle", timeout: 500}
+    }
+
+    text =
+      failure
+      |> Diagnostic.failure(spec: @counter_spec, mapping: Fixtures.CounterSpec)
+      |> Diagnostic.render(colors: false)
+
+    assert text =~ "error[timeout]"
+    assert text =~ "settling (project/1) didn't return within 500 ms"
+    assert text =~ "test/support/fixtures/counter_specs.ex"
+    assert text =~ "def project(pid), do: %{\"x\" => Counter.value(pid)}"
+    assert text =~ "settling (polling project/1) timed out"
+    refute text =~ "timed out here"
   end
 
   test "invalid_action_result points at def init when init/0 doesn't return {:ok, ctx}" do
