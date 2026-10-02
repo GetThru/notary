@@ -84,6 +84,24 @@ the spec's own text (`WF_vars(Reap)`, `SF_vars(...)`, ...), not assumed for
 every declared internal action — an internal action the spec never marks fair
 is never required to fire.
 
+### Generation
+
+By default (`generation: :walk`), sequences come from `Outlaw.Conformance.Walk`,
+which walks the spec's state graph: each generated value targets a graph edge
+directly (shortest path to it, then that transition), then continues with
+mostly actions enabled somewhere in the current possible set, some actions
+disabled everywhere (to exercise guards), and occasional `:settle` points
+(design spec §5.1). Pass `generation: :uniform` to keep the Phase 1 generator
+instead — uniform random picks from `actions/0`, no targeting, no `:settle`
+points:
+
+```elixir
+use Outlaw.Conformance, spec: "specs/Bank.tla", generation: :uniform
+```
+
+`:uniform` is useful as a baseline when comparing behavior, or while
+narrowing down whether a failure is particular to the walk's targeting.
+
 ## Seeing the state space
 
 ```bash
@@ -99,10 +117,38 @@ still checks the design across all interleavings. Liveness is checked only on
 the spec, plus the bounded settle check for fair internal actions (above).
 Keep `.cfg` constants small.
 
-Random generation can miss rare paths or bugs: measured on Outlaw's own
-`specs/TLCRunner.tla`, a missing watchdog is only caught on about 5 of 6
-default (100-run) `mix outlaw.verify` runs, and a missing state-limit kill on
-only about 1 of 8. Raise `--max-runs` for specs where that matters.
+Every passing `check` reports a coverage summary (`coverage: actions R/T,
+observed states R/T, transitions R/T`) plus `warning:` lines for gaps — read
+them, don't just trust a pass. A gap can be genuine and permanent rather than
+bad luck: on Outlaw's own `specs/TLCRunner.tla`, a couple of the graph's
+states are reachable in TLC but never in the real implementation, because an
+internal reaction (the state-limit kill beating a driven `Cancel`/`Timeout`
+at the same instant) wins a timing race every time — not a bug, just the
+coverage report documenting exactly which graph states the implementation's
+real timing rules out.
+
+Random generation can also miss paths that *aren't* ruled out, just rare.
+Measured on `specs/TLCRunner.tla` (`mix outlaw.verify --seed 1..10`, default
+100 runs, `generation: :walk`):
+
+- All 6 external actions plus both internal ones (`LimitKill`, `Reap`) are
+  reached on 10 of 10 seeds (`coverage: actions 8/8`).
+- A missing watchdog (the owner's `:DOWN` no longer kills the OS process) is
+  caught on 10 of 10 seeds, failing `internal_action_stalled` (pending
+  `Reap`) — `Reap` is the one internal action this spec marks fair, so the
+  end-of-run settle check requires it to happen.
+- A disabled state-limit kill is **not** caught by conformance on any of 10
+  seeds (0 of 10), because `LimitKill` is not marked fair in the spec:
+  nothing requires it to ever fire, so an implementation that never fires it
+  doesn't contradict the spec. The coverage report is what flags this
+  instead — `warning: never reached: LimitKill` plus its
+  `result = "too_many_states"` state missing from `observed states` — read
+  coverage warnings rather than relying on conformance pass/fail alone.
+
+Raise `--max-runs` for specs where a missed-but-possible path matters; it
+won't help an unfair internal action that silently stops firing (above) —
+catching that needs a human decision (mark it fair in the spec, or add a
+dedicated assertion), not more runs.
 
 ## Developing Outlaw
 

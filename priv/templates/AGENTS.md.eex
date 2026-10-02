@@ -9,6 +9,8 @@ specifications**. They are the contract for what the code must do.
 - Never weaken a mapping module (for example by not observing a variable, or
   marking an action `internal:` just to avoid generating or checking it) just
   to make verification pass.
+- Never silence a `coverage:` warning (e.g. `never reached: ...`) by changing
+  the mapping — read what it reveals instead, and ask the human if unsure.
 
 If a spec looks wrong, ambiguous or impossible to implement, stop and ask the human.
 
