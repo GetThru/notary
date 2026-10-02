@@ -39,7 +39,7 @@ defmodule Outlaw.MixProject do
   defp docs do
     [
       main: "readme",
-      extras: ["README.md", "guides/getting-started.md"],
+      extras: ["README.md", "guides/getting-started.md", "guides/rate-limiter.md"],
       groups_for_extras: [Guides: ~r{^guides/}]
     ]
   end

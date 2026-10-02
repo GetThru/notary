@@ -461,6 +461,9 @@ passes again.
 
 ## Next steps
 
+- Continue with [Rate Limiter: Constants and Time](rate-limiter.md): spec
+  constants, time as an external action driven by a fake clock, and a
+  second kind of failure.
 - If you use an LLM agent, add the snippet `mix outlaw.new` printed to your
   `CLAUDE.md` or `AGENTS.md`, and let the agent run
   `mix outlaw.verify --json`. Its last line of output is a JSON report
