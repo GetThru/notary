@@ -24,7 +24,12 @@ defmodule Outlaw.Viewer do
       note: Keyword.get(opts, :note),
       nodes:
         for(
-          {id, vars} <- Enum.sort(graph.states),
+          # By content, initial states first: TLC fingerprint ids carry no
+          # meaningful order (and change between runs).
+          {id, vars} <-
+            Enum.sort_by(graph.states, fn {id, vars} ->
+              {not MapSet.member?(initial, id), vars}
+            end),
           do: %{id: id, vars: render_vars(vars), initial: MapSet.member?(initial, id)}
         ),
       edges:

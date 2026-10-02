@@ -10,18 +10,22 @@ defmodule Outlaw.Viewer.Mermaid do
   @spec render(Outlaw.Viewer.model()) :: String.t()
   def render(model) do
     {nodes, note} = select(model)
-    alias_of = nodes |> Enum.with_index() |> Map.new(fn {n, i} -> {n.id, "s#{i}"} end)
-    shown = Map.keys(alias_of) |> MapSet.new()
+    index_of = nodes |> Enum.with_index() |> Map.new(fn {n, i} -> {n.id, i} end)
+    alias_of = Map.new(index_of, fn {id, i} -> {id, "s#{i}"} end)
+
+    edges =
+      model.edges
+      |> Enum.filter(&(Map.has_key?(index_of, &1.source) and Map.has_key?(index_of, &1.target)))
+      |> Enum.sort_by(&{index_of[&1.source], &1.action, index_of[&1.target]})
 
     lines =
       ["stateDiagram-v2"] ++
         if(note, do: ["    %% #{note}"], else: []) ++
         Enum.map(nodes, &~s(    state "#{label(&1)}" as #{alias_of[&1.id]})) ++
         for(n <- nodes, n.initial, do: "    [*] --> #{alias_of[n.id]}") ++
-        for(
-          e <- model.edges,
-          MapSet.member?(shown, e.source) and MapSet.member?(shown, e.target),
-          do: "    #{alias_of[e.source]} --> #{alias_of[e.target]} : #{escape(e.action)}"
+        Enum.map(
+          edges,
+          &"    #{alias_of[&1.source]} --> #{alias_of[&1.target]} : #{escape(&1.action)}"
         ) ++ highlight_lines(model.highlight, alias_of)
 
     Enum.join(lines, "\n") <> "\n"

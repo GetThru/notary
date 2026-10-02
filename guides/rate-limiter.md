@@ -109,18 +109,18 @@ until the limit, where it stops:
 
 ```mermaid
 stateDiagram-v2
-    state "count = 3" as s0
-    state "count = 0" as s1
+    state "count = 0" as s0
+    state "count = 1" as s1
     state "count = 2" as s2
-    state "count = 1" as s3
-    [*] --> s1
-    s0 --> s1 : Tick
-    s1 --> s3 : Request
-    s1 --> s1 : Tick
-    s2 --> s0 : Request
-    s2 --> s1 : Tick
-    s3 --> s2 : Request
-    s3 --> s1 : Tick
+    state "count = 3" as s3
+    [*] --> s0
+    s0 --> s1 : Request
+    s0 --> s0 : Tick
+    s1 --> s2 : Request
+    s1 --> s0 : Tick
+    s2 --> s3 : Request
+    s2 --> s0 : Tick
+    s3 --> s0 : Tick
 ```
 
 ## 3. Get it implemented

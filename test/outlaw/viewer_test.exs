@@ -163,6 +163,23 @@ defmodule Outlaw.ViewerTest do
       assert text =~ ~r/class s\d+ path/
     end
 
+    test "lists states by content (initial first) and edges by source, then action" do
+      text = Mermaid.render(Viewer.from_graph(Fixtures.graph("Counter")))
+
+      states = Regex.scan(~r/^    state "([^"]*)" as (s\d+)$/m, text, capture: :all_but_first)
+      assert Enum.map(states, &hd/1) == ["x = 0", "x = 1", "x = 2", "x = 3"]
+      assert Enum.map(states, &List.last/1) == ["s0", "s1", "s2", "s3"]
+
+      edges =
+        Regex.scan(~r/^    s(\d+) --> s(\d+) : (\w+)$/m, text, capture: :all_but_first)
+        |> Enum.map(fn [from, to, action] ->
+          {String.to_integer(from), action, String.to_integer(to)}
+        end)
+
+      assert edges == Enum.sort(edges)
+      assert {0, "Inc", 1} in edges
+    end
+
     test "escapes quotes and angle brackets" do
       model = %{
         title: "t",
