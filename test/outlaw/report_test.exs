@@ -470,18 +470,24 @@ defmodule Outlaw.ReportTest do
     assert text =~ "Conformance failure in Bank: action_not_enabled"
   end
 
-  test "a malformed Failure never breaks the report -- diagnostic building/rendering falls back to the legacy text" do
+  test "a malformed Failure never breaks the report -- diagnostic building/rendering falls back to the legacy text, logging the swallowed exception" do
+    import ExUnit.CaptureLog
+
     counter_spec = Outlaw.Spec.from_path("test/fixtures/specs/Counter.tla")
     # No steps at all: every Diagnostic builder indexes into f.steps (List.last,
     # Enum.at(-2), ...), so this would raise inside Outlaw.Diagnostic were it
     # not guarded.
     malformed = %Failure{kind: :action_not_enabled, seed: 1, steps: []}
 
-    text =
-      Report.format_failure("Bank", malformed, spec: counter_spec, mapping: nil)
+    {text, log} =
+      with_log(fn ->
+        Report.format_failure("Bank", malformed, spec: counter_spec, mapping: nil)
+      end)
 
     assert text == Report.format_failure("Bank", malformed)
     refute text =~ "error["
+    assert log =~ "[warning]"
+    assert log =~ "Outlaw.Diagnostic failed to build/render"
   end
 
   test "to_json is encodable and structured for LLMs" do
@@ -562,5 +568,77 @@ defmodule Outlaw.ReportTest do
              |> hd()
              |> Map.fetch!("stages")
              |> hd()
+  end
+
+  test "to_json adds a top-level location for a failure with a locatable diagnostic" do
+    counter_spec = Outlaw.Spec.from_path("test/fixtures/specs/Counter.tla")
+
+    {:error, failure} =
+      Outlaw.Conformance.check(
+        Outlaw.Fixtures.CounterNoGuardSpec,
+        Outlaw.Fixtures.graph("Counter"),
+        seed: 42,
+        max_runs: 200
+      )
+
+    json =
+      report([
+        %{
+          stage: :conformance,
+          status: :fail,
+          payload: {:error, failure},
+          internal: [],
+          fair: [],
+          spec: counter_spec,
+          mapping: Outlaw.Fixtures.CounterNoGuardSpec
+        }
+      ])
+      |> Report.to_json()
+
+    [conf] = hd(json["specs"])["stages"]
+
+    assert conf["failure"]["location"] == %{
+             "file" => "test/fixtures/specs/Counter.tla",
+             "line" => 10,
+             "column" => 11
+           }
+  end
+
+  test "to_json adds a top-level location for an invalid_mapping error" do
+    module = Outlaw.Fixtures.CounterUnknownActionSpec
+    {:error, error} = Outlaw.Conformance.validate(module, Outlaw.Fixtures.graph("Counter"))
+
+    json =
+      report([
+        %{stage: :conformance, status: :fail, payload: {:error, error}, mapping: module}
+      ])
+      |> Report.to_json()
+
+    [conf] = hd(json["specs"])["stages"]
+
+    assert %{"file" => "test/support/fixtures/counter_specs.ex", "line" => line, "column" => col} =
+             conf["error"]["location"]
+
+    assert is_integer(line) and line > 0
+    assert is_integer(col) and col > 0
+  end
+
+  test "to_json omits location when there's no spec/mapping context or nothing to locate" do
+    json =
+      report([%{stage: :conformance, status: :fail, payload: {:error, @failure}}])
+      |> Report.to_json()
+
+    [conf] = hd(json["specs"])["stages"]
+    refute Map.has_key?(conf["failure"], "location")
+
+    json2 =
+      Report.to_json(
+        report([
+          %{stage: :check, status: :error, payload: {:error, Error.new(:tlc_failed, "boom")}}
+        ])
+      )
+
+    [check] = hd(json2["specs"])["stages"]
+    refute Map.has_key?(check["error"], "location")
   end
 end

@@ -209,11 +209,39 @@ lock: pass
 Greeter: FAIL
   check: pass (2 distinct states)
   conformance: error
+    error[invalid_mapping]: Invalid mapping HelloOutlaw.Specs.Greeter
+       ╭─[test/outlaw/greeter_spec.ex:8:3]
+       │
+     6 │   See `Outlaw.Conformance` for the callbacks.
+     7 │   """
+     8 │   use Outlaw.Conformance, spec: "specs/Greeter.tla"
+       •   ────────────────────────┬────────────────────────
+       •                           ╰── use Outlaw.Conformance here
+     9 │ 
+    10 │   @impl true
+       ⋮
+    16 │ 
+    17 │   @impl true
+    18 │   def actions do
+       •   ──────┬───────
+       •         ╰── def actions
+    19 │     # One entry per spec action: name => StreamData generator of params.
+    20 │     %{
+       │
+       ╰─────
+         help: actions/0 names actions that never occur in the spec's state graph: Increment, Reset. Known actions: Greet. (An action that is never enabled under the .cfg constants does not appear.)
+
     Invalid mapping HelloOutlaw.Specs.Greeter:
       actions/0 names actions that never occur in the spec's state graph: Increment, Reset. Known actions: Greet. (An action that is never enabled under the .cfg constants does not appear.)
 
 Outlaw: verification FAILED.
 ```
+
+The `error[invalid_mapping]` block is Outlaw rendering that error as a
+compiler-style diagnostic, pointing straight at the `use Outlaw.Conformance`
+line and the `def actions` that names the unknown actions, with the fix in
+`help:`. The plain-text summary underneath is unchanged, for tools (or
+terminals) that don't render the diagnostic.
 
 Whether the agent writes it or you do, the result looks like this.
 
@@ -364,7 +392,21 @@ lock: pass
 Greeter: FAIL
   check: pass (2 distinct states)
   conformance: fail
-    Conformance failure in Greeter: action_not_enabled (seed 515386)
+    error[action_not_enabled]: Greet was accepted, but the spec doesn't allow it in greeted = TRUE
+       ╭─[specs/Greeter.tla:12:13]
+       │
+    10 │ 
+    11 │ \* Print the greeting. Only allowed if we haven't greeted yet.
+    12 │ Greet == /\ greeted = FALSE
+       •             ───────┬───────
+       •                    ╰── false here: greeted = TRUE
+    13 │          /\ greeted' = TRUE
+    14 │ 
+       │
+       ╰─────
+         help: return {:rejected, reason, ctx}
+
+    Conformance failure in Greeter: action_not_enabled (seed 100761)
     The implementation accepted an action the spec does not allow in this state. It should have returned {:rejected, reason, ctx}.
 
       step  action / params / outcome / implementation state
@@ -375,7 +417,7 @@ Greeter: FAIL
     Spec allowed: (no Greet transition is enabled here)
     minimized: 2 replays, 0 items removed, 0 params reduced
 
-    Reproduce: mix outlaw.test Greeter --seed 515386
+    Reproduce: mix outlaw.test Greeter --seed 100761
     Visualize: mix outlaw.graph Greeter --trace failure --open
 
 Outlaw: verification FAILED.
@@ -383,11 +425,14 @@ Outlaw: verification FAILED.
 
 Reading the report:
 
-- **`action_not_enabled`** is the kind of failure. Your code accepted an
-  action that the spec forbids in that state.
-- **The step table** is the shortest sequence Outlaw found that triggers
-  the bug: greet once (fine), then greet again. The second `Greet` should
-  have been refused.
+- **`error[action_not_enabled]`** is the same failure rendered as a
+  compiler-style diagnostic: it underlines the exact guard conjunct in
+  `specs/Greeter.tla` that was false (`greeted = FALSE`, in a state where
+  `greeted = TRUE`), with the fix (`help:`) right there instead of buried
+  further down the report.
+- **The step table** below it is the shortest sequence Outlaw found that
+  triggers the bug: greet once (fine), then greet again. The second `Greet`
+  should have been refused.
 - **`Spec allowed:`** shows what the spec permitted at that step: nothing,
   because no `Greet` is allowed once `greeted = TRUE`.
 - **`Reproduce:`** reruns exactly this failure, with the same seed.

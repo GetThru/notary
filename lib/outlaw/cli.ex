@@ -77,10 +77,16 @@ defmodule Outlaw.CLI do
     if opts[:json] do
       emit_json(Report.to_json(report))
     else
-      IO.puts(Report.format(report))
+      IO.puts(Report.format(report, colors: colors?()))
     end
 
     if report.status != :pass, do: exit({:shutdown, 1})
     :ok
   end
+
+  # Colors only when stdout is a real terminal: ANSI itself enabled, and
+  # stdout a TTY (not piped/redirected) -- design spec §9.1. `--json` never
+  # reaches here at all (handled above), and tests (stdout captured, not a
+  # TTY) render plain without needing to pass `colors: false` explicitly.
+  defp colors?, do: IO.ANSI.enabled?() and :io.columns(:stdio) != {:error, :enotsup}
 end

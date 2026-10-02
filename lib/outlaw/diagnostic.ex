@@ -5,14 +5,16 @@ defmodule Outlaw.Diagnostic do
   into the spec's `.tla` file (`Outlaw.Spec.Locate`) or the mapping module's
   own source (`Outlaw.Mapping.Locate`).
 
-  `failure/2` returns `nil` whenever no source location can be found (an
-  unparseable spec/mapping file, an action name the locator can't find, a
-  mapping that doesn't expose `module_info(:compile)[:source]`, ...); callers
-  fall back to the plain-text report in that case (no diagnostic, same text
-  as before this feature).
+  `failure/2` and `error/2` return `nil` whenever no source location can be
+  found (an unparseable spec/mapping file, an action name the locator can't
+  find, a mapping that doesn't expose `module_info(:compile)[:source]`,
+  ...); callers fall back to the plain-text report in that case (no
+  diagnostic, same text as before this feature). `location/2` gives just the
+  primary position (for `--json`'s `"location"` key) with the same fallback.
   """
 
   alias Outlaw.Conformance.Failure
+  alias Outlaw.Error
   alias Outlaw.Mapping.Locate, as: MappingLocate
   alias Outlaw.Spec
   alias Outlaw.Spec.Locate, as: SpecLocate
@@ -41,12 +43,70 @@ defmodule Outlaw.Diagnostic do
     build(f, spec, mapping)
   end
 
-  @doc "Renders a diagnostic built by `failure/2`, or `nil` straight through."
+  @doc """
+  Builds a diagnostic for `error`, or `nil` when nothing can be located.
+
+  Handles `:invalid_mapping` (points at the mapping's `use Outlaw.Conformance`
+  line, with `def actions` as secondary and help built from the error's own
+  message) and `:spec_error` (points at SANY's reported line/column in
+  `<spec.dir>/<module>.tla`). Any other kind -- spec lock mismatches,
+  Java/jar and TLC process errors -- returns `nil` (design spec §9.1: those
+  keep their plain text form, with no source position).
+
+  `opts`:
+    * `:spec` -- the `Outlaw.Spec.t()` the error came from. Required for
+      `:spec_error`; ignored for `:invalid_mapping`.
+    * `:mapping` -- the mapping module. Required for `:invalid_mapping`;
+      ignored for `:spec_error`.
+  """
+  @spec error(Error.t(), keyword()) :: t() | nil
+  def error(%Error{} = e, opts) do
+    spec = Keyword.get(opts, :spec)
+    mapping = Keyword.get(opts, :mapping)
+    build_error(e, spec, mapping)
+  end
+
+  @doc "Renders a diagnostic built by `failure/2`/`error/2`, or `nil` straight through."
   @spec render(t() | nil, keyword()) :: String.t() | nil
   def render(nil, _opts), do: nil
 
   def render({%PReport{} = report, sources}, opts) do
     Pentiment.format(report, sources, colors: Keyword.get(opts, :colors, false))
+  end
+
+  @doc """
+  The primary source position for `failure_or_error` -- `%{file, line,
+  column}` with `file` relative to the current working directory -- or `nil`
+  when `failure/2`/`error/2` can't locate one. Used for `--json`'s
+  `"location"` key. Never raises: built on top of `failure/2`/`error/2`, with
+  the same safety net (a `nil` `:spec`/`:mapping` for a kind that needs one,
+  or any other surprise, yields `nil` rather than crashing report rendering).
+  """
+  @spec location(Failure.t() | Error.t(), keyword()) ::
+          %{file: String.t(), line: pos_integer(), column: pos_integer()} | nil
+  def location(%Failure{} = f, opts) do
+    f |> failure(opts) |> extract_location()
+  rescue
+    _ -> nil
+  end
+
+  def location(%Error{} = e, opts) do
+    e |> error(opts) |> extract_location()
+  rescue
+    _ -> nil
+  end
+
+  defp extract_location(nil), do: nil
+
+  defp extract_location({%PReport{labels: labels, source: source}, _sources}) do
+    case Enum.find(labels, &Label.primary?/1) do
+      nil ->
+        nil
+
+      label ->
+        span = Label.resolved_span(label)
+        %{file: source, line: span.start_line, column: span.start_column}
+    end
   end
 
   # -- dispatch ---------------------------------------------------------------
@@ -77,6 +137,13 @@ defmodule Outlaw.Diagnostic do
     do: during_based(f, mapping)
 
   defp build(_f, _spec, _mapping), do: nil
+
+  defp build_error(%Error{kind: :invalid_mapping} = e, _spec, mapping),
+    do: invalid_mapping(e, mapping)
+
+  defp build_error(%Error{kind: :spec_error} = e, spec, _mapping), do: spec_error(e, spec)
+
+  defp build_error(_e, _spec, _mapping), do: nil
 
   # -- action_not_enabled -------------------------------------------------------
 
@@ -330,6 +397,91 @@ defmodule Outlaw.Diagnostic do
     end
   end
 
+  # -- invalid_mapping (Outlaw.Error) ------------------------------------------------
+
+  defp invalid_mapping(e, mapping) do
+    with {:ok, rel, text, loc} <- mapping_source(mapping),
+         line when is_integer(line) <- loc.use_line do
+      label = mapping_line_label(text, line, "use Outlaw.Conformance here")
+
+      report =
+        error_base_report(:invalid_mapping, invalid_mapping_headline(e), rel)
+        |> PReport.with_label(label)
+        |> with_actions_label(loc, text)
+        |> PReport.with_help(invalid_mapping_help(e))
+
+      {report, %{rel => text}}
+    else
+      _ -> nil
+    end
+  end
+
+  defp with_actions_label(report, %{actions_line: line}, text) when is_integer(line),
+    do: PReport.with_label(report, mapping_line_label(text, line, "def actions", :secondary))
+
+  defp with_actions_label(report, _loc, _text), do: report
+
+  # The error's own message is `"Invalid mapping <module>:\n  <problem>\n  ..."`
+  # (`Outlaw.Conformance.validate/2`) -- the first line (sans trailing `:`) is
+  # a ready-made headline, and the rest (one problem per line, each indented
+  # by the join) is the help text, flattened to a single line.
+  defp invalid_mapping_headline(e), do: e.message |> first_line() |> String.trim_trailing(":")
+
+  defp invalid_mapping_help(e) do
+    e.message
+    |> String.split("\n")
+    |> Enum.drop(1)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("; ")
+  end
+
+  # -- spec_error (SANY, via Outlaw.Error) ---------------------------------------------
+
+  defp spec_error(e, spec) do
+    with %Spec{dir: dir} <- spec,
+         %{module: module, line: line, column: column} <- Map.get(e.details, :location),
+         path = Path.join(dir, module <> ".tla"),
+         {:ok, text} <- File.read(path) do
+      rel = Path.relative_to_cwd(path)
+      {message, note} = sany_message_and_note(e.details[:output])
+      label = Label.primary(Span.position(line, column), message)
+
+      report =
+        error_base_report(:spec_error, message, rel)
+        |> PReport.with_label(label)
+
+      report = if note, do: PReport.with_note(report, note), else: report
+      {report, %{rel => text}}
+    else
+      _ -> nil
+    end
+  end
+
+  # SANY's output is already stripped of the "Parsing file"/"Semantic
+  # processing of module" lines (`Outlaw.TLC.Output`) -- the first remaining
+  # non-blank line is the message, the rest (if any) the note.
+  defp sany_message_and_note(text) when is_binary(text) do
+    case text |> String.split("\n") |> Enum.split_while(&(String.trim(&1) == "")) do
+      {_blank, [first | rest]} ->
+        note = rest |> Enum.join("\n") |> String.trim()
+        {String.trim(first), if(note == "", do: nil, else: note)}
+
+      {_all_blank, []} ->
+        {"TLA+ spec error", nil}
+    end
+  end
+
+  defp sany_message_and_note(_), do: {"TLA+ spec error", nil}
+
+  defp first_line(text), do: text |> String.split("\n") |> List.first()
+
+  defp error_base_report(kind, message, source_rel) do
+    PReport.error(message)
+    |> PReport.with_code(Atom.to_string(kind))
+    |> PReport.with_source(source_rel)
+  end
+
   # -- shared helpers -----------------------------------------------------------------
 
   defp base_report(f, source_rel) do
@@ -517,10 +669,10 @@ defmodule Outlaw.Diagnostic do
   # A mapping source line's full text, from its first non-blank character to
   # its last -- used for every mapping-pointing diagnostic, where
   # `Outlaw.Mapping.Locate` only gives a line number.
-  defp mapping_line_label(text, line, message) do
+  defp mapping_line_label(text, line, message, priority \\ :primary) do
     source_line = text |> String.split("\n") |> Enum.at(line - 1) || ""
     leading = source_line |> String.replace(~r/^(\s*).*/s, "\\1") |> String.length()
     end_col = String.length(String.trim_trailing(source_line)) + 1
-    span_label(line, leading + 1, line, end_col, :primary, message)
+    span_label(line, leading + 1, line, end_col, priority, message)
   end
 end

@@ -17,7 +17,7 @@ defmodule Outlaw.DiagnosticTest do
   use ExUnit.Case, async: true
 
   alias Outlaw.Conformance.{Failure, Step}
-  alias Outlaw.{Conformance, Diagnostic, Fixtures, Spec}
+  alias Outlaw.{Conformance, Diagnostic, Fixtures, Spec, TLC}
   alias Outlaw.DiagnosticTest.CrashedMapping
 
   @counter_spec Spec.from_path("test/fixtures/specs/Counter.tla")
@@ -185,6 +185,114 @@ defmodule Outlaw.DiagnosticTest do
     assert length(:binary.matches(text, "╰── one of these is false in x = 0")) == 2
     assert text =~ "/\\ a"
     assert text =~ "/\\ b"
+  end
+
+  test "illegal_transition labels every effect conjunct when an action has several" do
+    tmp =
+      Path.join(
+        System.tmp_dir!(),
+        "outlaw_diag_several_effects_#{System.unique_integer([:positive])}.tla"
+      )
+
+    File.write!(tmp, """
+    ---- MODULE Temp ----
+    VARIABLE x, y
+    Init == x = 0 /\\ y = 0
+    Act == /\\ x' = x + 1
+           /\\ y' = y + 1
+    Next == Act
+    ====
+    """)
+
+    on_exit(fn -> File.rm(tmp) end)
+
+    spec = Spec.from_path(tmp)
+
+    failure = %Failure{
+      kind: :illegal_transition,
+      seed: 1,
+      steps: [
+        %Step{
+          index: 0,
+          outcome: :ok,
+          projection: %{"x" => 0, "y" => 0},
+          allowed: [%{"x" => 0, "y" => 0}]
+        },
+        %Step{
+          index: 1,
+          action: "Act",
+          outcome: :ok,
+          projection: %{"x" => 1, "y" => 5},
+          allowed: [%{"x" => 1, "y" => 1}]
+        }
+      ]
+    }
+
+    text =
+      failure
+      |> Diagnostic.failure(spec: spec, mapping: nil)
+      |> Diagnostic.render(colors: false)
+
+    assert text =~ "Act reached a state the spec doesn't allow"
+    # One label per effect conjunct, each carrying the same "implementation
+    # reached ..." message -- never claiming which effect is wrong.
+    assert length(:binary.matches(text, "implementation reached x = 1, y = 5")) == 2
+    assert text =~ "/\\ x' = x + 1"
+    assert text =~ "/\\ y' = y + 1"
+    assert text =~ "note: spec allowed: x = 1, y = 1"
+  end
+
+  test "invalid_mapping points at the use Outlaw.Conformance line, def actions as secondary, help from the error" do
+    module = Fixtures.CounterUnknownActionSpec
+    {:error, error} = Conformance.validate(module, Fixtures.graph("Counter"))
+
+    text =
+      error
+      |> Diagnostic.error(spec: nil, mapping: module)
+      |> Diagnostic.render(colors: false)
+
+    assert text =~ "error[invalid_mapping]"
+    assert text =~ "test/support/fixtures/counter_specs.ex"
+    assert text =~ "use Outlaw.Conformance,"
+    assert text =~ "╰── use Outlaw.Conformance here"
+    assert text =~ "def actions, do: %{\"Inc\" => StreamData.constant"
+    assert text =~ "╰── def actions"
+    assert text =~ "help:"
+    assert text =~ "Decrement"
+    assert text =~ "nope"
+  end
+
+  test "error/2 returns nil for invalid_mapping when no mapping is given" do
+    module = Fixtures.CounterUnknownActionSpec
+    {:error, error} = Conformance.validate(module, Fixtures.graph("Counter"))
+
+    assert Diagnostic.error(error, spec: nil, mapping: nil) == nil
+  end
+
+  describe "spec_error (needs TLC)" do
+    @describetag :tlc
+    @describetag :tmp_dir
+
+    setup %{tmp_dir: dir} do
+      Application.put_env(:outlaw, :work_dir, Path.join(dir, "work"))
+      on_exit(fn -> Application.delete_env(:outlaw, :work_dir) end)
+    end
+
+    test "spec_error points at SANY's reported line/column, with the rest of its text as a note" do
+      {:ok, spec} = Spec.fetch("Broken", "test/fixtures/specs_bad")
+      {:error, error} = TLC.check(spec)
+
+      text =
+        error
+        |> Diagnostic.error(spec: spec, mapping: nil)
+        |> Diagnostic.render(colors: false)
+
+      assert text =~ "error[spec_error]"
+      assert text =~ "test/fixtures/specs_bad/Broken.tla:3:9"
+      assert text =~ "Init == x ="
+      assert text =~ "***Parse Error***"
+      assert text =~ "note:"
+    end
   end
 
   test "failure/2 returns nil when the action name can't be located in the spec" do

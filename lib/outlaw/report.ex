@@ -1,6 +1,8 @@
 defmodule Outlaw.Report do
   @moduledoc "Renders Outlaw results as human-readable text and as JSON-ready maps."
 
+  require Logger
+
   alias Outlaw.{Error, Value}
   alias Outlaw.Conformance.{Failure, Step}
 
@@ -68,7 +70,7 @@ defmodule Outlaw.Report do
       case payload do
         {:violation, v} -> format_violation(name, v)
         {:error, %Failure{} = f} -> format_failure(name, f, stage_context(stage_map, colors))
-        {:error, %Error{} = e} -> format_error(e)
+        {:error, %Error{} = e} -> format_error(e, stage_context(stage_map, colors))
       end
 
     "  #{stage}: #{status}\n" <> indent(body, 4)
@@ -125,11 +127,50 @@ defmodule Outlaw.Report do
       "(first: #{format_state(List.first(unreached))})"
   end
 
+  # An Outlaw.Error gets the same pentiment-diagnostic-before-legacy-text
+  # treatment as a Failure (`format_failure/2` below) -- `:invalid_mapping`
+  # and `:spec_error` are locatable (design spec §9.1); every other kind
+  # falls straight through to the legacy text (no :spec/:mapping context, or
+  # `Outlaw.Diagnostic.error/2` itself returns nil).
+  defp format_error(%Error{} = e, context) do
+    legacy = legacy_error_text(e)
+
+    case error_diagnostic_text(e, context) do
+      nil -> legacy
+      diagnostic -> diagnostic <> "\n\n" <> legacy
+    end
+  end
+
+  defp error_diagnostic_text(e, context) do
+    case Keyword.get(context, :spec) do
+      nil ->
+        nil
+
+      spec ->
+        colors = Keyword.get(context, :colors, false)
+        mapping = Keyword.get(context, :mapping)
+
+        e
+        |> Outlaw.Diagnostic.error(spec: spec, mapping: mapping)
+        |> Outlaw.Diagnostic.render(colors: colors)
+    end
+  rescue
+    # Same safety net as a Failure's diagnostic (see diagnostic_text/2) --
+    # a bonus on top of the legacy report, never a reason to lose it.
+    error ->
+      Logger.warning(
+        "Outlaw.Diagnostic failed to build/render an error diagnostic, falling back to plain text: " <>
+          Exception.message(error)
+      )
+
+      nil
+  end
+
   # Outlaw.Error.details can carry context that doesn't make it into `message`
   # (e.g. the last output lines on a TLC timeout, or the raw text behind an
   # unparseable value): spec §9 wants those in the human-readable report too,
   # not just in `--json`/`to_json/1`'s `details`.
-  defp format_error(%Error{message: message, details: details}) do
+  defp legacy_error_text(%Error{message: message, details: details}) do
     extras =
       [
         detail_block("Last output", details[:output_tail]),
@@ -180,8 +221,15 @@ defmodule Outlaw.Report do
     # a locator, a malformed Failure (e.g. empty steps), or any other
     # surprise while building/rendering it must never take down the report
     # itself -- fall back to no diagnostic (the plain legacy text), same as
-    # an unlocatable source.
-    _ -> nil
+    # an unlocatable source. Logged (not silently swallowed) so a broken
+    # diagnostic layer is still visible somewhere.
+    e ->
+      Logger.warning(
+        "Outlaw.Diagnostic failed to build/render a failure diagnostic, falling back to plain text: " <>
+          Exception.message(e)
+      )
+
+      nil
   end
 
   defp legacy_failure_text(spec_name, %Failure{} = f) do
@@ -308,9 +356,15 @@ defmodule Outlaw.Report do
         do: conformance_extra_json(s, payload),
         else: %{}
 
+    # Always carries :spec/:mapping (nil when the stage never had one) so
+    # `Outlaw.Diagnostic.location/2` gets the same context the text report's
+    # diagnostic does -- it safely yields nil for the kinds/stages that need
+    # the missing piece, same as a stage with no location at all.
+    context = [spec: Map.get(s, :spec), mapping: Map.get(s, :mapping)]
+
     %{"stage" => Atom.to_string(stage), "status" => Atom.to_string(status)}
     |> Map.merge(extra)
-    |> Map.merge(payload_json(payload))
+    |> Map.merge(payload_json(payload, context))
   end
 
   defp conformance_extra_json(s, payload) do
@@ -341,16 +395,19 @@ defmodule Outlaw.Report do
     }
   end
 
-  defp payload_json(:ok), do: %{}
-  defp payload_json(:skipped), do: %{}
+  defp payload_json(:ok, _context), do: %{}
+  defp payload_json(:skipped, _context), do: %{}
 
-  defp payload_json({:ok, %{distinct_states: d, states_generated: g}}),
+  defp payload_json({:ok, %{distinct_states: d, states_generated: g}}, _context),
     do: %{"distinct_states" => d, "states_generated" => g}
 
-  defp payload_json({:ok, %{runs: r, seed: s}}), do: %{"runs" => r, "seed" => s}
-  defp payload_json({:violation, v}), do: %{"violation" => violation_json(v)}
-  defp payload_json({:error, %Failure{} = f}), do: %{"failure" => failure_json(f)}
-  defp payload_json({:error, %Error{} = e}), do: %{"error" => error_json(e)}
+  defp payload_json({:ok, %{runs: r, seed: s}}, _context), do: %{"runs" => r, "seed" => s}
+  defp payload_json({:violation, v}, _context), do: %{"violation" => violation_json(v)}
+
+  defp payload_json({:error, %Failure{} = f}, context),
+    do: %{"failure" => failure_json(f, context)}
+
+  defp payload_json({:error, %Error{} = e}, context), do: %{"error" => error_json(e, context)}
 
   defp violation_json(v) do
     %{
@@ -371,7 +428,7 @@ defmodule Outlaw.Report do
     }
   end
 
-  defp failure_json(%Failure{} = f) do
+  defp failure_json(%Failure{} = f, context) do
     %{
       "kind" => Atom.to_string(f.kind),
       "explanation" => Failure.explanation(f.kind),
@@ -391,14 +448,31 @@ defmodule Outlaw.Report do
         end),
       "details" => jsonable(Map.drop(f.details, [:frame]))
     }
+    |> with_location_json(f, context)
   end
 
-  defp error_json(%Error{} = e),
-    do: %{
+  defp error_json(%Error{} = e, context) do
+    %{
       "kind" => Atom.to_string(e.kind),
       "message" => e.message,
       "details" => jsonable(e.details)
     }
+    |> with_location_json(e, context)
+  end
+
+  # Adds `"location" => %{"file", "line", "column"}` (design spec §9.1) when
+  # `Outlaw.Diagnostic.location/2` finds one for this failure/error in its
+  # stage's :spec/:mapping context -- absent otherwise (no key change to
+  # anything that already shipped).
+  defp with_location_json(map, failure_or_error, context) do
+    case Outlaw.Diagnostic.location(failure_or_error, context) do
+      nil ->
+        map
+
+      %{file: file, line: line, column: column} ->
+        Map.put(map, "location", %{"file" => file, "line" => line, "column" => column})
+    end
+  end
 
   defp state_json(state) when is_map(state),
     do: Map.new(state, fn {k, v} -> {k, Value.to_tla(v)} end)
