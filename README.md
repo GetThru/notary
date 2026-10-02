@@ -44,6 +44,13 @@ mix outlaw.install      # pinned tla2tools.jar; needs Java >= 11 (or use this re
 `specs/AGENTS.md` tells agents the rules: specs are yours, and agents never
 edit them. If a spec changes without `mix outlaw.lock`, verification fails.
 
+A conformance failure or error renders as a compiler-style diagnostic first
+(a source excerpt with the responsible span underlined, then `help:`/`note:`
+lines) whenever Outlaw can locate it in the spec or mapping file, followed by
+the full step table. `--json` carries the same position as
+`"location": {"file", "line", "column"}` on the `failure`/`error` object, so
+an agent (or an editor) can jump straight there.
+
 ## The mapping module
 
 ```elixir

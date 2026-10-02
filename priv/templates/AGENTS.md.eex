@@ -37,5 +37,12 @@ If a spec looks wrong, ambiguous or impossible to implement, stop and ask the hu
 - `conformance` failed: read `failure.kind`, `failure.explanation` and the
   shrunk `failure.steps`. The last step is where the implementation diverged;
   `spec_allowed` lists what the spec permitted there. Fix the **code**.
+- The text report leads with a compiler-style diagnostic (source excerpt,
+  underlined span, `help:`/`note:`) when a source location was found — read
+  that first. In `--json`, a failure or error with a location carries it as
+  `"location": {"file", "line", "column"}`; open that file/line before
+  reading anything else. A diagnostic's label is a pointer to go read, not a
+  verdict: with several guards it marks all of them, since Outlaw never
+  claims which one is false.
 - For a picture, run `mix outlaw.graph <Name> --format mermaid --trace failure`.
 - Re-run with the reported `--seed` to reproduce.
