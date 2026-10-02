@@ -335,9 +335,7 @@ defmodule Outlaw.DiagnosticTest do
     # Exactly one guard conjunct in Ship(u) -- a single "false here" label
     # (not the several-guards "one of these" wording), and the UNCHANGED
     # gateway effect conjunct gets no label of its own.
-    assert length(
-             :binary.matches(text, ~s(╰── false here: gateway = "up", status = "cart"))
-           ) == 1
+    assert length(:binary.matches(text, ~s(╰── false here: gateway = "up", status = "cart"))) == 1
   end
 
   test "invalid_mapping points at the use Outlaw.Conformance line, def actions as secondary, help from the error" do
