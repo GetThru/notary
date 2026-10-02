@@ -11,6 +11,10 @@ specifications**. They are the contract for what the code must do.
   to make verification pass.
 - Never silence a `coverage:` warning (e.g. `never reached: ...`) by changing
   the mapping — read what it reveals instead, and ask the human if unsure.
+  Report every `never reached:` coverage warning to the human, even one you
+  believe is genuine (a timing race an internal action always loses, an
+  action the spec never marks fair) — it still needs human confirmation, not
+  just your own silence about it.
 
 If a spec looks wrong, ambiguous or impossible to implement, stop and ask the human.
 
