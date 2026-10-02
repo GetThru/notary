@@ -77,7 +77,7 @@ defmodule Outlaw.CLI do
     if opts[:json] do
       emit_json(Report.to_json(report))
     else
-      IO.puts(Report.format(report, colors: colors?()))
+      IO.puts(Report.format(report, colors: colors?(opts[:json])))
     end
 
     if report.status != :pass, do: exit({:shutdown, 1})
@@ -85,8 +85,19 @@ defmodule Outlaw.CLI do
   end
 
   # Colors only when stdout is a real terminal: ANSI itself enabled, and
-  # stdout a TTY (not piped/redirected) -- design spec §9.1. `--json` never
-  # reaches here at all (handled above), and tests (stdout captured, not a
-  # TTY) render plain without needing to pass `colors: false` explicitly.
-  defp colors?, do: IO.ANSI.enabled?() and :io.columns(:stdio) != {:error, :enotsup}
+  # stdout a TTY (not piped/redirected) -- design spec §9.1. `--json` is
+  # checked here too (belt and braces; `finish/2` already skips this branch
+  # entirely when it's set).
+  #
+  # `:io.columns/1` wants Erlang's `:standard_io` -- Elixir's `:stdio` is not
+  # a device `:io.columns/1` recognizes, so passing it always answers
+  # `{:error, :enotsup}`, even on a real pty, which silently disabled colors
+  # everywhere.
+  defp colors?(json?), do: colors?(IO.ANSI.enabled?(), :io.columns(:standard_io), json?)
+
+  @doc false
+  @spec colors?(boolean(), {:ok, pos_integer()} | {:error, term()}, boolean() | nil) :: boolean()
+  def colors?(ansi_enabled?, columns_result, json?) do
+    not json? and ansi_enabled? and match?({:ok, _}, columns_result)
+  end
 end
