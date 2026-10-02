@@ -202,7 +202,7 @@ defmodule Outlaw.Spec.Locate do
   end
 
   defp find_keyword_after(lines, start_idx, start_col, end_idx) do
-    Enum.reduce_while(start_idx..end_idx, nil, fn idx, _ ->
+    Enum.reduce_while(start_idx..end_idx//1, nil, fn idx, _ ->
       line = Enum.at(lines, idx)
       search_from = if idx == start_idx, do: start_col, else: 0
       tail = String.slice(line, search_from, String.length(line) - search_from)
@@ -242,7 +242,7 @@ defmodule Outlaw.Spec.Locate do
     if starts_with_and?(Enum.at(lines, body_idx), body_col) do
       item_indices =
         [body_idx] ++
-          Enum.filter((body_idx + 1)..end_idx, fn i ->
+          Enum.filter((body_idx + 1)..end_idx//1, fn i ->
             sibling_start?(Enum.at(lines, i), body_col)
           end)
 

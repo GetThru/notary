@@ -98,6 +98,30 @@ defmodule Outlaw.SpecTest do
     assert Spec.fair_actions(spec) == MapSet.new(["Next"])
   end
 
+  test "an unclosed (* inside a \\* line comment doesn't blank the rest of the file", %{
+    tmp_dir: dir
+  } do
+    write(dir, [
+      {"X.tla",
+       ~S"""
+       ---- MODULE X ----
+       VARIABLE x
+       \* old syntax (* was used
+       Tick == /\ x' = x + 1
+       Spec == WF_x(Tick)
+       ====
+       """}
+    ])
+
+    spec = Spec.from_path(Path.join(dir, "X.tla"))
+    assert Spec.fair_actions(spec) == MapSet.new(["Tick"])
+  end
+
+  test "a \\* inside a string literal is not treated as a comment" do
+    text = ~S{Foo == "price \* not a comment" /\ Bar(x)}
+    assert Spec.strip_comments(text) == text
+  end
+
   test "content hash changes with the spec, its cfg, or a sibling module", %{tmp_dir: dir} do
     write(dir, [{"A.tla", "a"}, {"A.cfg", "c"}, {"Helper.tla", "h"}])
     {:ok, spec} = Spec.fetch("A", dir)

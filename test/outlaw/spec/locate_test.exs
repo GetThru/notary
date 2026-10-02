@@ -167,6 +167,19 @@ defmodule Outlaw.Spec.LocateTest do
       assert %{name: "Real", line: 3} = Locate.definition(text, "Real")
     end
 
+    test "an unclosed (* inside a \\* line comment doesn't blank the rest of the file" do
+      text = """
+      ---- MODULE X ----
+      VARIABLE x
+      \\* old syntax (* was used
+      Tick == /\\ x' = x + 1
+      Spec == WF_x(Tick)
+      ====
+      """
+
+      assert %{name: "Tick", line: 4} = Locate.definition(text, "Tick")
+    end
+
     test "LET ... IN: conjuncts come from the /\\ list after the top-level IN" do
       text =
         "---- MODULE X ----\n" <>

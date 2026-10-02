@@ -99,63 +99,87 @@ defmodule Outlaw.Spec do
 
   @doc """
   Strips TLA comments (`\\* ...` to end of line, and `(* ... *)` blocks, which
-  may span lines) from `text`, replacing their characters with spaces rather
-  than deleting them. Every character that isn't part of a comment keeps its
-  original line and column, so callers that need source positions (such as
-  `Outlaw.Spec.Locate`) can scan the result directly. Shared with
-  `fair_actions/1` so there is one comment-stripping implementation.
+  may span lines and nest) from `text`, replacing their characters with
+  spaces rather than deleting them. Every character that isn't part of a
+  comment keeps its original line and column, so callers that need source
+  positions (such as `Outlaw.Spec.Locate`) can scan the result directly.
+  Shared with `fair_actions/1` so there is one comment-stripping
+  implementation.
+
+  A single left-to-right pass over the text, tracking one of three states:
+  plain text, inside a `(* ... *)` block (with its nesting depth), or inside
+  a `"..."` string literal. This matters because the three can't be scanned
+  independently: a `\\*` line comment is only a comment outside a block
+  comment or a string (so an unbalanced `(*` *inside* a `\\* ...` comment must
+  not start a real block comment that swallows the rest of the file), a block
+  comment's own contents are never scanned for string literals, and a string
+  literal's contents are never scanned for comment markers (`\\*`, `(*`,
+  `*)`) at all.
   """
   @spec strip_comments(String.t()) :: String.t()
   def strip_comments(text) do
     text
-    |> strip_block_comments()
-    |> strip_line_comments()
-  end
-
-  # `(* ... *)` block comments nest (`(* outer (* inner *) still outer *)`),
-  # so a non-greedy regex (which would stop at the first `*)`) isn't enough —
-  # this tracks nesting depth instead, one character at a time.
-  defp strip_block_comments(text) do
-    text
     |> String.graphemes()
-    |> strip_block_chars(0, [])
+    |> scan(:normal, 0, [])
     |> Enum.reverse()
     |> Enum.join()
   end
 
-  defp strip_block_chars([], _depth, acc), do: acc
+  defp scan([], _state, _depth, acc), do: acc
 
-  defp strip_block_chars(["(", "*" | rest], depth, acc) do
-    strip_block_chars(rest, depth + 1, [" ", " " | acc])
+  # `(* ... *)` nests (`(* outer (* inner *) still outer *)`); recognized in
+  # plain text and already inside a block comment, but not inside a string.
+  defp scan(["(", "*" | rest], state, depth, acc) when state in [:normal, :block] do
+    scan(rest, :block, depth + 1, [" ", " " | acc])
   end
 
-  defp strip_block_chars(["*", ")" | rest], depth, acc) when depth > 0 do
-    strip_block_chars(rest, depth - 1, [" ", " " | acc])
+  defp scan(["*", ")" | rest], :block, depth, acc) when depth > 1 do
+    scan(rest, :block, depth - 1, [" ", " " | acc])
   end
 
-  defp strip_block_chars([ch | rest], depth, acc) when depth > 0 do
-    strip_block_chars(rest, depth, [blank(ch) | acc])
+  defp scan(["*", ")" | rest], :block, 1, acc) do
+    scan(rest, :normal, 0, [" ", " " | acc])
   end
 
-  defp strip_block_chars([ch | rest], depth, acc) do
-    strip_block_chars(rest, depth, [ch | acc])
+  # A `\* ...` line comment: only outside a block comment (inside one, `\*`
+  # is just two ordinary characters) and only in plain text (a string's `\*`
+  # isn't a comment either). Blanks straight through to (not including) the
+  # next newline -- any `(*`/`*)` in there is just more blanked text, not a
+  # block-comment delimiter, so an unterminated `(*` can't swallow anything
+  # past this line.
+  defp scan(["\\", "*" | rest], :normal, depth, acc) do
+    scan_to_eol(rest, depth, [" ", " " | acc])
   end
+
+  # A string literal's contents are copied through untouched -- not scanned
+  # for comment markers -- up to and including its closing `"`. `\"` is an
+  # escaped quote, not the closing one.
+  defp scan(["\"" | rest], :normal, depth, acc) do
+    scan_string(rest, depth, ["\"" | acc])
+  end
+
+  # Inside a block comment, every other character is blanked (newlines kept,
+  # so line numbers downstream don't shift).
+  defp scan([ch | rest], :block, depth, acc) do
+    scan(rest, :block, depth, [blank(ch) | acc])
+  end
+
+  # Plain text otherwise: copied through unchanged.
+  defp scan([ch | rest], state, depth, acc) do
+    scan(rest, state, depth, [ch | acc])
+  end
+
+  defp scan_to_eol(["\n" | _] = rest, depth, acc), do: scan(rest, :normal, depth, acc)
+  defp scan_to_eol([], depth, acc), do: scan([], :normal, depth, acc)
+  defp scan_to_eol([ch | rest], depth, acc), do: scan_to_eol(rest, depth, [blank(ch) | acc])
+
+  defp scan_string(["\\", ch | rest], depth, acc), do: scan_string(rest, depth, [ch, "\\" | acc])
+  defp scan_string(["\"" | rest], depth, acc), do: scan(rest, :normal, depth, ["\"" | acc])
+  defp scan_string([], depth, acc), do: scan([], :normal, depth, acc)
+  defp scan_string([ch | rest], depth, acc), do: scan_string(rest, depth, [ch | acc])
 
   defp blank("\n"), do: "\n"
   defp blank(_), do: " "
-
-  defp strip_line_comments(text) do
-    text
-    |> String.split("\n")
-    |> Enum.map_join("\n", &blank_line_comment/1)
-  end
-
-  defp blank_line_comment(line) do
-    case String.split(line, "\\*", parts: 2) do
-      [before, comment] -> before <> String.duplicate(" ", String.length(comment) + 2)
-      [before] -> before
-    end
-  end
 
   defp new(tla, cfg) do
     %__MODULE__{
