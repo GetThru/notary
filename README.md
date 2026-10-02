@@ -87,11 +87,11 @@ is never required to fire.
 ### Generation
 
 By default (`generation: :walk`), sequences come from `Outlaw.Conformance.Walk`,
-which walks the spec's state graph: each generated value targets a graph edge
-directly (shortest path to it, then that transition), then continues with
-mostly actions enabled somewhere in the current possible set, some actions
-disabled everywhere (to exercise guards), and occasional `:settle` points
-(design spec §5.1). Pass `generation: :uniform` to keep the Phase 1 generator
+which walks the spec's state graph: about half of the generated values target
+a graph edge directly (shortest path to it, then that transition); every value
+then continues with mostly actions enabled somewhere in the current possible
+set, some actions disabled everywhere (to exercise guards), and occasional
+`:settle` points (design spec §5.1). Pass `generation: :uniform` to keep the Phase 1 generator
 instead — uniform random picks from `actions/0`, no targeting, no `:settle`
 points:
 
@@ -123,7 +123,7 @@ them, don't just trust a pass. A gap can be genuine and permanent rather than
 bad luck: on Outlaw's own `specs/TLCRunner.tla`, a couple of the graph's
 states are reachable in TLC but never in the real implementation, because an
 internal reaction (the state-limit kill beating a driven `Cancel`/`Timeout`
-at the same instant) wins a timing race every time — not a bug, just the
+at the same instant) wins the timing race in every measured run — not a bug, just the
 coverage report documenting exactly which graph states the implementation's
 real timing rules out.
 
@@ -141,14 +141,22 @@ Measured on `specs/TLCRunner.tla` (`mix outlaw.verify --seed 1..10`, default
   seeds (0 of 10), because `LimitKill` is not marked fair in the spec:
   nothing requires it to ever fire, so an implementation that never fires it
   doesn't contradict the spec. The coverage report is what flags this
-  instead — `warning: never reached: LimitKill` plus its
-  `result = "too_many_states"` state missing from `observed states` — read
-  coverage warnings rather than relying on conformance pass/fail alone.
+  instead — `warning: never reached: LimitKill` plus a
+  `warning: N observed states never reached (first: ...)` line, which among
+  those N includes the `result = "too_many_states"` state. The text warning
+  only names a count and the first unreached state; the full list (including
+  that `too_many_states` state) is in `--json`'s
+  `coverage.states.unreached` — read coverage warnings rather than relying on
+  conformance pass/fail alone.
 
 Raise `--max-runs` for specs where a missed-but-possible path matters; it
 won't help an unfair internal action that silently stops firing (above) —
 catching that needs a human decision (mark it fair in the spec, or add a
-dedicated assertion), not more runs.
+dedicated assertion), not more runs. `--seed`, `--max-runs` and `--json` are
+CLI options on `mix outlaw.verify`/`mix outlaw.test`; `settle_timeout` is not
+— it's set via `config :outlaw, settle_timeout: ...` — and `max_replays`
+(the post-shrink minimization pass's replay budget) isn't exposed by any mix
+task at all, only as an opt to `Outlaw.Conformance.Runner.check/4` directly.
 
 ## Developing Outlaw
 
