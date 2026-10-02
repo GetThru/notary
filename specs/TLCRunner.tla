@@ -94,7 +94,9 @@ Reap == /\ caller = "dead"
 Next == \/ Start \/ Progress \/ LimitKill \/ Exit
         \/ Timeout \/ Cancel \/ CallerDies \/ Reap
 
-Spec == Init /\ [][Next]_vars /\ WF_vars(Reap)
+\* Both reactions must eventually happen once enabled: a dead caller is
+\* reaped, and an over-limit run is killed.
+Spec == Init /\ [][Next]_vars /\ WF_vars(Reap) /\ WF_vars(LimitKill)
 
 \* --- Safety -------------------------------------------------------------
 
