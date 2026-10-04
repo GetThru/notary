@@ -129,13 +129,29 @@ if Code.ensure_loaded?(Phoenix.LiveViewTest) and Code.ensure_loaded?(LazyHTML) d
     defp live_result({:ok, view, html}, conn), do: {:live, conn, view, html}
     defp live_result({:error, {_kind, %{to: _} = opts}}, conn), do: {:redirect, conn, opts}
 
-    defp put_result(ctx, {:live, conn, view, html}),
+    @max_redirects 5
+
+    defp put_result(ctx, result, hops \\ @max_redirects)
+
+    defp put_result(ctx, {:live, conn, view, html}, _hops),
       do: %{ctx | conn: conn, view: view, html: html}
 
-    defp put_result(ctx, {:static, conn, html}), do: %{ctx | conn: conn, view: nil, html: html}
-    # Mount-time redirects are followed in Task 4; until then they surface plainly.
-    defp put_result(_ctx, {:redirect, _conn, opts}),
-      do: raise("mount redirected to #{opts.to}; redirect following arrives in Task 4")
+    defp put_result(ctx, {:static, conn, html}, _hops),
+      do: %{ctx | conn: conn, view: nil, html: html}
+
+    defp put_result(ctx, {:redirect, conn, opts}, hops) when hops > 0 do
+      {conn, to} = Phoenix.LiveViewTest.__follow_redirect__(conn, ctx.endpoint, nil, opts)
+      put_result(ctx, visit(conn, ctx.endpoint, to), hops - 1)
+    end
+
+    defp put_result(_ctx, {:redirect, _conn, opts}, 0),
+      do:
+        raise(
+          Outlaw.Error.new(
+            :invalid_mapping,
+            "more than #{@max_redirects} redirects in a row (last to #{opts.to})"
+          )
+        )
 
     @submit_buttons "button:not([type]), button[type=submit], input[type=submit]"
 
@@ -249,6 +265,9 @@ if Code.ensure_loaded?(Phoenix.LiveViewTest) and Code.ensure_loaded?(LazyHTML) d
         html when is_binary(html) ->
           Phoenix.LiveViewTest.render_async(view, Outlaw.Config.get(:settle_timeout))
           {:ok, ctx}
+
+        {:error, {kind, %{to: _} = opts}} when kind in [:live_redirect, :redirect] ->
+          {:ok, put_result(ctx, {:redirect, ctx.conn, opts})}
       end
     end
   end

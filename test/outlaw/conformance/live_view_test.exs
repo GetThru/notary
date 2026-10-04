@@ -40,6 +40,23 @@ defmodule Outlaw.Conformance.LiveViewTest do
     ctx
   end
 
+  describe "redirects" do
+    test "push_navigate to another LiveView replaces the view" do
+      {:ok, ctx} = mount("/toggle", endpoint: Endpoint)
+      assert {:ok, ctx} = click(ctx, "#go")
+      assert ctx.view != nil
+      assert project_dom(ctx) == %{"page" => "done"}
+    end
+
+    test "redirect to a page that isn't a LiveView gives view: nil and projects its html" do
+      {:ok, ctx} = mount("/toggle", endpoint: Endpoint)
+      assert {:ok, ctx} = click(ctx, "#leave")
+      assert ctx.view == nil
+      assert project_dom(ctx) == %{"page" => "plain"}
+      assert {:rejected, {:not_available, "#flip"}, _} = click(ctx, "#flip")
+    end
+  end
+
   describe "click/2" do
     test "an available element is clicked and the result is {:ok, ctx}" do
       assert {:ok, ctx} = click(toggle(), "#flip")
