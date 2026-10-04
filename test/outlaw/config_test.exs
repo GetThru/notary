@@ -4,9 +4,17 @@ defmodule Outlaw.ConfigTest do
   alias Outlaw.Config
 
   setup do
+    # The nix dev shell sets OUTLAW_TLA2TOOLS; these tests control it themselves.
+    env_jar = System.get_env("OUTLAW_TLA2TOOLS")
+    System.delete_env("OUTLAW_TLA2TOOLS")
+
     on_exit(fn ->
       for key <- [:max_states, :work_dir, :tla2tools_path],
           do: Application.delete_env(:outlaw, key)
+
+      if env_jar,
+        do: System.put_env("OUTLAW_TLA2TOOLS", env_jar),
+        else: System.delete_env("OUTLAW_TLA2TOOLS")
     end)
   end
 
@@ -42,6 +50,22 @@ defmodule Outlaw.ConfigTest do
     Application.put_env(:outlaw, :work_dir, "/tmp/outlaw-x")
     assert Config.work_dir() == "/tmp/outlaw-x"
     assert Config.jar_path() == default_jar
+  end
+
+  test "OUTLAW_TLA2TOOLS sets the jar path when no config is given" do
+    System.put_env("OUTLAW_TLA2TOOLS", "/nix/store/x-tla2tools/share/java/tla2tools.jar")
+    assert Config.jar_path() == "/nix/store/x-tla2tools/share/java/tla2tools.jar"
+  end
+
+  test "config :outlaw, tla2tools_path wins over OUTLAW_TLA2TOOLS" do
+    System.put_env("OUTLAW_TLA2TOOLS", "/from/env.jar")
+    Application.put_env(:outlaw, :tla2tools_path, "/from/config.jar")
+    assert Config.jar_path() == "/from/config.jar"
+  end
+
+  test "an empty OUTLAW_TLA2TOOLS is ignored" do
+    System.put_env("OUTLAW_TLA2TOOLS", "")
+    assert Config.jar_path() == Path.join(Config.work_dir(), "tla2tools.jar")
   end
 
   test "pinned tools metadata" do

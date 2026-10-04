@@ -39,10 +39,22 @@ defmodule Outlaw.Config do
   *default* work dir (`_build/outlaw`), not the possibly-overridden `work_dir/0` —
   overriding `config :outlaw, work_dir:` only relocates generated artifacts (cache,
   reports, HTML), not the installed jar. Override the jar location independently
-  with `config :outlaw, tla2tools_path:`.
+  with `config :outlaw, tla2tools_path:`, or with the `OUTLAW_TLA2TOOLS`
+  environment variable (which the Outlaw nix flake's shells set to a jar in the
+  nix store). Config wins over the environment variable.
   """
   @spec jar_path() :: String.t()
-  def jar_path, do: get(:tla2tools_path) || Path.join(default_work_dir(), "tla2tools.jar")
+  def jar_path do
+    get(:tla2tools_path) || env_jar_path() || Path.join(default_work_dir(), "tla2tools.jar")
+  end
+
+  defp env_jar_path do
+    case System.get_env("OUTLAW_TLA2TOOLS") do
+      nil -> nil
+      "" -> nil
+      path -> path
+    end
+  end
 
   defp default_work_dir, do: Path.expand("../outlaw", Mix.Project.build_path())
 
