@@ -39,9 +39,9 @@ if Code.ensure_loaded?(Phoenix.LiveViewTest) and Code.ensure_loaded?(LazyHTML) d
                   "Outlaw.Conformance.LiveView.mount/2 needs an endpoint: pass endpoint: MyAppWeb.Endpoint or set config :outlaw, endpoint: MyAppWeb.Endpoint"
                 )
 
-      registered? = ensure_test_supervisor()
+      ensure_test_supervisor()
       conn = Phoenix.ConnTest.build_conn()
-      ctx = %Ctx{conn: conn, endpoint: endpoint, registered?: registered?}
+      ctx = %Ctx{conn: conn, endpoint: endpoint}
 
       result =
         if is_binary(target) do
@@ -55,32 +55,51 @@ if Code.ensure_loaded?(Phoenix.LiveViewTest) and Code.ensure_loaded?(LazyHTML) d
       {:ok, put_result(ctx, result)}
     end
 
-    @doc "Cleans up what `mount/2` registered. Call it from `teardown/1`."
+    @doc """
+    Cleans up what `mount/2` registered for the calling process. Call it from
+    `teardown/1`. Idempotent: it does nothing when this process wasn't
+    registered by Outlaw (an ExUnit test process) or was already cleaned up.
+    """
     @spec unmount(Ctx.t()) :: :ok
-    def unmount(%Ctx{registered?: true}) do
-      # `ExUnit.OnExitHandler.run/2` waits for the registered process's test
-      # supervisor to go down, which normally happens because that process
-      # itself has already exited (its death takes the linked supervisor
-      # with it) before some *other* process calls `run/2` on its behalf.
-      # Here the registered process is us, and we're still running, so
-      # nothing kills the supervisor on its own and `run/2` would block for
-      # the full timeout. Stop it ourselves first, trapping exits so the
-      # cascade (supervisor -> LiveView channel -> our own linked
-      # ClientProxy) doesn't crash this process.
-      trapping? = Process.flag(:trap_exit, true)
+    def unmount(%Ctx{}), do: unregister()
 
-      case ExUnit.OnExitHandler.get_supervisor(self()) do
-        {:ok, sup} when is_pid(sup) -> Process.exit(sup, :shutdown)
+    # Registration is tracked per process, not in ctx: a re-mount in the same
+    # process finds the registration already there, and the ctx it returns
+    # must still clean it up.
+    @registered {__MODULE__, :registered}
+
+    defp unregister do
+      with true <- Process.get(@registered, false),
+           {:ok, sup} <- ExUnit.OnExitHandler.get_supervisor(self()) do
+        Process.delete(@registered)
+        stop_test_supervisor(sup)
+      else
         _ -> :ok
       end
-
-      _ = ExUnit.OnExitHandler.run(self(), 5_000)
-      flush_exits()
-      Process.flag(:trap_exit, trapping?)
-      :ok
     end
 
-    def unmount(%Ctx{}), do: :ok
+    # `ExUnit.OnExitHandler.run/2` waits for the registered process's test
+    # supervisor to go down, which normally happens because that process
+    # itself has already exited (its death takes the linked supervisor with
+    # it) before some *other* process calls `run/2` on its behalf. Here the
+    # registered process is us, and we're still running, so nothing kills the
+    # supervisor on its own and `run/2` would block for the full timeout.
+    # Stop it ourselves first, trapping exits so the cascade (supervisor ->
+    # LiveView channel -> our own linked ClientProxy) doesn't crash this
+    # process. `sup` is nil when nothing ever asked for it.
+    defp stop_test_supervisor(sup) do
+      trapping? = Process.flag(:trap_exit, true)
+
+      try do
+        if is_pid(sup), do: Process.exit(sup, :shutdown)
+        _ = ExUnit.OnExitHandler.run(self(), 5_000)
+        flush_exits()
+      after
+        Process.flag(:trap_exit, trapping?)
+      end
+
+      :ok
+    end
 
     defp flush_exits do
       receive do
@@ -93,18 +112,19 @@ if Code.ensure_loaded?(Phoenix.LiveViewTest) and Code.ensure_loaded?(LazyHTML) d
     # LiveViewTest refuses to run outside an ExUnit test process
     # (`ExUnit.fetch_test_supervisor/0`). The runner's per-run process isn't
     # one, and `mix outlaw.verify` doesn't start ExUnit at all, so register
-    # the calling process the way ExUnit's own runner does. Returns whether
-    # we registered (so `unmount/1` knows to clean up).
+    # the calling process the way ExUnit's own runner does, and remember (in
+    # the process dictionary) that we did, so `unmount/1` knows to clean up.
     defp ensure_test_supervisor do
       {:ok, _} = Application.ensure_all_started(:ex_unit)
 
       case ExUnit.fetch_test_supervisor() do
         {:ok, _} ->
-          false
+          :ok
 
         :error ->
           :ok = ExUnit.OnExitHandler.register(self())
-          true
+          Process.put(@registered, true)
+          :ok
       end
     end
 
@@ -123,6 +143,15 @@ if Code.ensure_loaded?(Phoenix.LiveViewTest) and Code.ensure_loaded?(LazyHTML) d
         %Plug.Conn{status: status} when status in 300..399 ->
           [to | _] = Plug.Conn.get_resp_header(conn, "location")
           {:redirect, conn, %{to: to}}
+
+        %Plug.Conn{status: status} ->
+          unregister()
+
+          raise Outlaw.Error.new(
+                  :invalid_mapping,
+                  "GET #{inspect(path)} answered with status #{status}; Outlaw.Conformance.LiveView needs a page (200) or a redirect (3xx)",
+                  %{path: path, status: status}
+                )
       end
     end
 
@@ -219,6 +248,13 @@ if Code.ensure_loaded?(Phoenix.LiveViewTest) and Code.ensure_loaded?(LazyHTML) d
     def project_assigns(%Ctx{view: view}, keys) when not is_nil(view) do
       %{socket: %{assigns: assigns}} = :sys.get_state(view.pid)
       Map.new(keys, &{Atom.to_string(&1), Map.fetch!(assigns, &1)})
+    end
+
+    def project_assigns(%Ctx{view: nil}, _keys) do
+      raise Outlaw.Error.new(
+              :invalid_mapping,
+              "project_assigns/2 needs a LiveView; the current page is not one"
+            )
     end
 
     defp current_html(%Ctx{view: nil, html: html}), do: html

@@ -16,11 +16,11 @@ defmodule Outlaw.Fixtures.Web do
   # Starts the test endpoint once per VM (test_helper.exs, measurement scripts).
   def start! do
     Application.put_env(:phoenix, :json_library, JSON)
-    Application.put_env(:phoenix, :logger, false)
 
     Application.put_env(:outlaw, Outlaw.Fixtures.Web.Endpoint,
       secret_key_base: String.duplicate("outlaw", 11),
       live_view: [signing_salt: "outlaw-live-salt"],
+      render_errors: [formats: [html: Outlaw.Fixtures.Web.ErrorHTML], layout: false, log: false],
       server: false
     )
 

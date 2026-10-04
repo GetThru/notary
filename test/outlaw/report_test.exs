@@ -570,6 +570,20 @@ defmodule Outlaw.ReportTest do
              |> hd()
   end
 
+  test "to_json carries the selector of an action_not_offered failure (design spec §8.4)" do
+    failure = %Failure{@failure | kind: :action_not_offered, details: %{selector: "#pay"}}
+
+    json =
+      report([%{stage: :conformance, status: :fail, payload: {:error, failure}}])
+      |> Report.to_json()
+      |> JSON.encode!()
+      |> JSON.decode!()
+
+    [conf] = hd(json["specs"])["stages"]
+    assert conf["failure"]["kind"] == "action_not_offered"
+    assert conf["failure"]["details"]["selector"] == "#pay"
+  end
+
   test "to_json adds a top-level location for a failure with a locatable diagnostic" do
     counter_spec = Outlaw.Spec.from_path("test/fixtures/specs/Counter.tla")
 

@@ -15,6 +15,7 @@ defmodule Outlaw.Fixtures.Web.Router do
     live("/done", Outlaw.Fixtures.Web.DoneLive)
     live("/async", Outlaw.Fixtures.Web.AsyncLive)
     get("/plain", Outlaw.Fixtures.Web.PageController, :plain)
+    get("/teapot", Outlaw.Fixtures.Web.PageController, :teapot)
     live("/wizard", Outlaw.Fixtures.WizardLive)
     live("/wizard/done", Outlaw.Fixtures.WizardDoneLive)
   end

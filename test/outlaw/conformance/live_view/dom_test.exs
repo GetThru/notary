@@ -21,6 +21,15 @@ defmodule Outlaw.Conformance.LiveView.DomTest do
               %{"s" => "payment", "i" => 3, "b" => true, "q" => [1, "a"], "r" => %{"k" => 1}}}
   end
 
+  test "json: an empty object is the empty function <<>>, at any depth" do
+    assert Dom.decode(var("e", "data-outlaw-json", "{}")) == {:ok, %{"e" => []}}
+
+    assert Dom.decode(var("n", "data-outlaw-json", ~s({"a": {}}))) ==
+             {:ok, %{"n" => %{"a" => []}}}
+
+    assert Dom.decode(var("l", "data-outlaw-json", "[{}]")) == {:ok, %{"l" => [[]]}}
+  end
+
   test "tla: sets and model values via Outlaw.Value" do
     html = var("users", "data-outlaw-value", "{u1, u2}") <> var("me", "data-outlaw-value", "u1")
 

@@ -27,11 +27,69 @@ defmodule Outlaw.Conformance.LiveViewTest do
           {:ok, ctx} = mount(ToggleLive, endpoint: Endpoint)
           html = Phoenix.LiveViewTest.render(ctx.view)
           :ok = unmount(ctx)
-          {ctx.registered?, html}
+          {ExUnit.OnExitHandler.get_supervisor(self()), html}
         end)
 
-      assert {true, html} = Task.await(task)
+      assert {:error, html} = Task.await(task)
       assert html =~ ~s(id="flip")
+    end
+
+    test "a path that isn't routed is an Outlaw.Error naming the path and status" do
+      task =
+        Task.async(fn ->
+          result =
+            try do
+              mount("/no-such-page", endpoint: Endpoint)
+            rescue
+              e in Outlaw.Error -> e
+            end
+
+          {result, ExUnit.OnExitHandler.get_supervisor(self())}
+        end)
+
+      assert {%Outlaw.Error{kind: :invalid_mapping, message: message}, :error} =
+               Task.await(task)
+
+      assert message =~ "/no-such-page"
+      assert message =~ "404"
+    end
+
+    test "a page answering with a status other than 200 or a redirect is an Outlaw.Error" do
+      assert_raise Outlaw.Error, ~r{"/teapot".*418}, fn ->
+        mount("/teapot", endpoint: Endpoint)
+      end
+    end
+  end
+
+  describe "unmount/1" do
+    test "a second unmount is a no-op :ok and leaves trap_exit as it was" do
+      task =
+        Task.async(fn ->
+          {:ok, ctx} = mount(ToggleLive, endpoint: Endpoint)
+          :ok = unmount(ctx)
+          {unmount(ctx), Process.info(self(), :trap_exit)}
+        end)
+
+      assert {:ok, {:trap_exit, false}} = Task.await(task)
+    end
+
+    test "re-mounting in the same process, then unmounting, cleans up the registration" do
+      task =
+        Task.async(fn ->
+          {:ok, _first} = mount(ToggleLive, endpoint: Endpoint)
+          {:ok, second} = mount(ToggleLive, endpoint: Endpoint)
+          :ok = unmount(second)
+          {ExUnit.OnExitHandler.get_supervisor(self()), Process.info(self(), :trap_exit)}
+        end)
+
+      assert {:error, {:trap_exit, false}} = Task.await(task)
+    end
+
+    test "unmount in an ExUnit test process (not registered by Outlaw) does nothing" do
+      {:ok, ctx} = mount(ToggleLive, endpoint: Endpoint)
+      assert :ok = unmount(ctx)
+      assert {:ok, sup} = ExUnit.OnExitHandler.get_supervisor(self())
+      assert Process.alive?(sup)
     end
   end
 
@@ -137,6 +195,14 @@ defmodule Outlaw.Conformance.LiveViewTest do
 
       assert {:outlaw_fail, :invalid_projection, %{variable: "x", message: _}} =
                catch_throw(project_dom(ctx))
+    end
+
+    test "project_assigns on a page that isn't a LiveView is an Outlaw.Error" do
+      {:ok, ctx} = mount("/plain", endpoint: Endpoint)
+
+      assert_raise Outlaw.Error, ~r/project_assigns\/2 needs a LiveView/, fn ->
+        project_assigns(ctx, [:on])
+      end
     end
 
     test "project_assigns reads the given assigns as string keys" do

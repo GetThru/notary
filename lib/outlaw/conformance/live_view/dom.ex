@@ -4,7 +4,8 @@ if Code.ensure_loaded?(LazyHTML) do
     Decodes the `data-outlaw-var` markup convention (design spec §8.5) from
     rendered HTML into a projection. Each element carries `data-outlaw-var`
     and exactly one of `data-outlaw-json` (built-in `JSON`; no null or
-    floats) or `data-outlaw-value` (TLC syntax, `Outlaw.Value.parse/1`).
+    floats; an empty object is the empty function `<<>>`, i.e. `[]`) or
+    `data-outlaw-value` (TLC syntax, `Outlaw.Value.parse/1`).
     """
 
     @spec decode(String.t()) ::
@@ -32,7 +33,7 @@ if Code.ensure_loaded?(LazyHTML) do
          when not is_map_key(attrs, "data-outlaw-value") do
       with {:ok, decoded} <- json(raw),
            :ok <- json_supported(decoded, raw) do
-        {:ok, decoded}
+        {:ok, empty_maps_to_sequences(decoded)}
       else
         _ ->
           {:error,
@@ -50,6 +51,18 @@ if Code.ensure_loaded?(LazyHTML) do
 
     defp value(name, _attrs),
       do: {:error, "#{inspect(name)}: needs exactly one of data-outlaw-json or data-outlaw-value"}
+
+    # TLC prints an empty function as `<<>>`, which `Outlaw.Value` parses to
+    # `[]`; an empty JSON object must be the same value or it can never match.
+    defp empty_maps_to_sequences(map) when map == %{}, do: []
+
+    defp empty_maps_to_sequences(map) when is_map(map),
+      do: Map.new(map, fn {k, v} -> {k, empty_maps_to_sequences(v)} end)
+
+    defp empty_maps_to_sequences(list) when is_list(list),
+      do: Enum.map(list, &empty_maps_to_sequences/1)
+
+    defp empty_maps_to_sequences(v), do: v
 
     defp json(raw) do
       {:ok, JSON.decode!(raw)}
