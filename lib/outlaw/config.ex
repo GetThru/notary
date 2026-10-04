@@ -9,6 +9,7 @@ defmodule Outlaw.Config do
     work_dir: nil,
     tla2tools_path: nil,
     java: "java",
+    endpoint: nil,
     tlc_workers: "auto",
     tlc_timeout: 300_000,
     max_states: 100_000,

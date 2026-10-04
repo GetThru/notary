@@ -9,4 +9,6 @@ if :tlc in exclude do
   IO.puts("Skipping :tlc tests (need java and `mix outlaw.install`).")
 end
 
+Outlaw.Fixtures.Web.start!()
+
 ExUnit.start(exclude: exclude)

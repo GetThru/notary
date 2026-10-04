@@ -32,6 +32,8 @@ defmodule Outlaw.MixProject do
     [
       {:stream_data, "~> 1.1"},
       {:pentiment, "~> 0.2.1"},
+      {:phoenix_live_view, "~> 1.2", optional: true},
+      {:lazy_html, "~> 0.1", optional: true},
       {:ex_doc, "~> 0.40", only: :dev, runtime: false}
     ]
   end

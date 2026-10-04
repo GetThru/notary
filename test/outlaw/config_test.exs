@@ -22,6 +22,7 @@ defmodule Outlaw.ConfigTest do
     assert Config.get(:max_states) == 100_000
     assert Config.get(:tlc_workers) == "auto"
     assert Config.get(:java) == "java"
+    assert Config.get(:endpoint) == nil
   end
 
   test "application env overrides defaults" do
