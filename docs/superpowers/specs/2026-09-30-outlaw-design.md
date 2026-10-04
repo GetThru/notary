@@ -479,7 +479,7 @@ are unchanged, except for the availability rule in §8.4.
 
 | Module | Responsibility |
 |---|---|
-| `Outlaw.Conformance.LiveView` | Helpers: `mount/2`, `click/2`, `submit/3`, `change/3`, `project_dom/1`, `project_assigns/2`, and the `outlaw_var/1` function component. |
+| `Outlaw.Conformance.LiveView` | Helpers: `mount/2`, `click/2`, `submit/3`, `change/3`, `project_dom/1`, `project_assigns/2`. |
 | `Outlaw.Conformance.LiveView.Ctx` | `%Ctx{conn, view, html, endpoint, assigns}`. `view` is the current `Phoenix.LiveViewTest.View`, or `nil` after a redirect to a page that isn't a LiveView, where `html` holds that page. `assigns` is free space for the mapping, e.g. a stub's pid. |
 | `Outlaw.Conformance.LiveView.Dom` | Pure function: rendered HTML → `%{var => value}`. Unit-tested without any LiveView process. |
 
@@ -542,19 +542,26 @@ For `:action_not_offered`:
 
 ### 8.5 Observing
 
-**Markup convention.** Each observed variable is one element:
+**Markup convention.** The markers live in the application's own templates,
+which compile in every environment. Outlaw is a `:dev`/`:test` dependency, so
+the markup uses no Outlaw code: plain attributes, decoded by Outlaw. Each
+observed variable is one element with `data-outlaw-var` and exactly one value
+attribute:
 
 ```heex
-<span data-outlaw-var="step" data-outlaw-value={~s("payment")} hidden />
+<span hidden data-outlaw-var="step"  data-outlaw-json={JSON.encode!(@step)} />
+<span hidden data-outlaw-var="users" data-outlaw-value={"{u1, u2}"} />
 ```
 
-The value is TLC syntax, parsed by `Outlaw.Value`. To avoid hand-written TLC,
-the `outlaw_var/1` function component renders Elixir values in that syntax:
-`<.outlaw_var name="step" value={@step} />`.
-
-- Strings, integers and booleans render as TLC.
-- `Outlaw.Value` model values, sets and records render as TLC.
-- Lists render as sequences.
+- **`data-outlaw-json`** is decoded with Elixir's built-in `JSON`, with no
+  extra dependency.
+  - Strings, integers and booleans map directly.
+  - Arrays are sequences.
+  - Objects are records with string keys.
+  - `null` and floats are `:invalid_projection`.
+- **`data-outlaw-value`** is TLC syntax, parsed by `Outlaw.Value`. It is used
+  for sets and model values, which JSON cannot express.
+- An element with both value attributes, or neither, is `:invalid_projection`.
 
 **`project_dom/1`** renders the view (or uses `html`) and collects every
 `[data-outlaw-var]` via `Dom`:
@@ -682,7 +689,8 @@ The Outlaw repo ships a `flake.nix` dev shell providing Elixir/Erlang, a JDK, an
       following).
 
     `Wizard.tla` is human-authored, written with the agent as TLCRunner was,
-    and locked.
+    and reviewed by the human. Fixture specs are not covered by
+    `specs/.outlaw.lock`.
   - Phase 2b: a two-user PubSub variant.
 - Tests needing Java are tagged `:tlc`; value/graph tests run anywhere.
 - CI order: fixture suite first, then Outlaw's own `mix outlaw.verify` (§12).
@@ -703,7 +711,7 @@ and Mermaid, flake, fixtures.
 **Phase 2a — LiveView, single view.** (§8)
 
 1. The human writes `Wizard.tla` first.
-2. The helpers, `Dom` and `outlaw_var/1` are built test-first.
+2. The helpers and `Dom` are built test-first.
 3. The runner gains `:action_not_offered` (§8.4).
 4. The wizard fixtures join the circular-trust-guard suite.
 5. Measured catch rates for both buggy wizards (`--seed 1..10`) are recorded
