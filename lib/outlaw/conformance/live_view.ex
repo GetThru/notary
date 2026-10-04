@@ -136,5 +136,120 @@ if Code.ensure_loaded?(Phoenix.LiveViewTest) and Code.ensure_loaded?(LazyHTML) d
     # Mount-time redirects are followed in Task 4; until then they surface plainly.
     defp put_result(_ctx, {:redirect, _conn, opts}),
       do: raise("mount redirected to #{opts.to}; redirect following arrives in Task 4")
+
+    @submit_buttons "button:not([type]), button[type=submit], input[type=submit]"
+
+    @doc """
+    Clicks the element matching `selector`. Returns
+    `{:rejected, {:not_available, selector}, ctx}` without sending an event
+    when the element is missing or `disabled` (design spec §8.3/§8.4).
+    """
+    @spec click(Ctx.t(), String.t()) ::
+            {:ok, Ctx.t()} | {:rejected, {:not_available, String.t()}, Ctx.t()}
+    def click(%Ctx{} = ctx, selector) do
+      with {:ok, _node} <- available(ctx, selector, :click) do
+        act(ctx, fn view ->
+          view |> Phoenix.LiveViewTest.element(selector) |> Phoenix.LiveViewTest.render_click()
+        end)
+      end
+    end
+
+    @doc "Submits the form matching `selector` with `values`. Unavailable if missing, disabled, or every submit button is disabled."
+    @spec submit(Ctx.t(), String.t(), map()) ::
+            {:ok, Ctx.t()} | {:rejected, {:not_available, String.t()}, Ctx.t()}
+    def submit(%Ctx{} = ctx, selector, values) do
+      with {:ok, _node} <- available(ctx, selector, :submit) do
+        act(ctx, fn view ->
+          view
+          |> Phoenix.LiveViewTest.form(selector, values)
+          |> Phoenix.LiveViewTest.render_submit()
+        end)
+      end
+    end
+
+    @doc "Sends a change event for the form matching `selector`. Unavailable if missing or disabled."
+    @spec change(Ctx.t(), String.t(), map()) ::
+            {:ok, Ctx.t()} | {:rejected, {:not_available, String.t()}, Ctx.t()}
+    def change(%Ctx{} = ctx, selector, values) do
+      with {:ok, _node} <- available(ctx, selector, :change) do
+        act(ctx, fn view ->
+          view
+          |> Phoenix.LiveViewTest.form(selector, values)
+          |> Phoenix.LiveViewTest.render_change()
+        end)
+      end
+    end
+
+    @doc """
+    Projects the `data-outlaw-var` markup of the current view (or static
+    page). A bad marker throws `:invalid_projection` for the runner.
+    """
+    @spec project_dom(Ctx.t()) :: %{String.t() => Outlaw.Value.t()}
+    def project_dom(%Ctx{} = ctx) do
+      case Outlaw.Conformance.LiveView.Dom.decode(current_html(ctx)) do
+        {:ok, projection} -> projection
+        {:error, details} -> throw({:outlaw_fail, :invalid_projection, details})
+      end
+    end
+
+    @doc """
+    Escape hatch: reads `keys` from the LiveView's socket assigns, returned
+    with string keys. Depends on LiveView internals (the channel process's
+    state); prefer `project_dom/1`.
+    """
+    @spec project_assigns(Ctx.t(), [atom()]) :: %{String.t() => term()}
+    def project_assigns(%Ctx{view: view}, keys) when not is_nil(view) do
+      %{socket: %{assigns: assigns}} = :sys.get_state(view.pid)
+      Map.new(keys, &{Atom.to_string(&1), Map.fetch!(assigns, &1)})
+    end
+
+    defp current_html(%Ctx{view: nil, html: html}), do: html
+    defp current_html(%Ctx{view: view}), do: Phoenix.LiveViewTest.render(view)
+
+    defp available(%Ctx{view: nil} = ctx, selector, _kind),
+      do: {:rejected, {:not_available, selector}, ctx}
+
+    defp available(%Ctx{} = ctx, selector, kind) do
+      nodes = ctx |> current_html() |> LazyHTML.from_fragment() |> LazyHTML.query(selector)
+
+      case Enum.count(nodes) do
+        0 ->
+          {:rejected, {:not_available, selector}, ctx}
+
+        1 ->
+          if enabled?(nodes, kind),
+            do: {:ok, nodes},
+            else: {:rejected, {:not_available, selector}, ctx}
+
+        n ->
+          raise Outlaw.Error.new(
+                  :invalid_mapping,
+                  "selector #{inspect(selector)} matches #{n} elements; Outlaw.Conformance.LiveView helpers need exactly one"
+                )
+      end
+    end
+
+    defp enabled?(node, kind) do
+      disabled? = LazyHTML.attribute(node, "disabled") != []
+
+      cond do
+        disabled? -> false
+        kind != :submit -> true
+        true -> submit_enabled?(LazyHTML.query(node, @submit_buttons))
+      end
+    end
+
+    # No submit button at all: still submittable (Enter in a field).
+    defp submit_enabled?(buttons) do
+      Enum.count(buttons) == 0 or Enum.any?(buttons, &(LazyHTML.attribute(&1, "disabled") == []))
+    end
+
+    defp act(%Ctx{view: view} = ctx, fun) do
+      case fun.(view) do
+        html when is_binary(html) ->
+          Phoenix.LiveViewTest.render_async(view, Outlaw.Config.get(:settle_timeout))
+          {:ok, ctx}
+      end
+    end
   end
 end

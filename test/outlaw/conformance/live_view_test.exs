@@ -34,6 +34,88 @@ defmodule Outlaw.Conformance.LiveViewTest do
       assert html =~ ~s(id="flip")
     end
   end
+
+  defp toggle do
+    {:ok, ctx} = mount(ToggleLive, endpoint: Endpoint)
+    ctx
+  end
+
+  describe "click/2" do
+    test "an available element is clicked and the result is {:ok, ctx}" do
+      assert {:ok, ctx} = click(toggle(), "#flip")
+      assert project_dom(ctx)["on"] == true
+    end
+
+    test "a disabled element is not available and sends no event" do
+      ctx = toggle()
+      assert {:rejected, {:not_available, "#off"}, ^ctx} = click(ctx, "#off")
+      assert project_dom(ctx)["on"] == false
+    end
+
+    test "an element removed by :if is not available" do
+      assert {:rejected, {:not_available, "#only-when-on"}, _} = click(toggle(), "#only-when-on")
+      {:ok, ctx} = click(toggle(), "#flip")
+      assert {:ok, _} = click(ctx, "#only-when-on")
+    end
+
+    test "a selector matching several elements is a mapping bug, not a verdict" do
+      assert_raise Outlaw.Error, ~r/\.dup.*2 elements/, fn -> click(toggle(), ".dup") end
+    end
+  end
+
+  describe "submit/3 and change/3" do
+    test "submit sends the values" do
+      assert {:ok, ctx} = submit(toggle(), "#name-form", %{name: "ada"})
+      assert project_dom(ctx)["name"] == "ada"
+    end
+
+    test "a form whose only submit button is disabled is not available" do
+      {:ok, ctx} = click(toggle(), "#lock")
+
+      assert {:rejected, {:not_available, "#name-form"}, _} =
+               submit(ctx, "#name-form", %{name: "x"})
+    end
+
+    test "a form without a submit button is available" do
+      assert {:ok, ctx} = submit(toggle(), "#bare-form", %{name: "bo"})
+      assert project_dom(ctx)["name"] == "bo"
+    end
+
+    test "change sends a change event even when submit is disabled" do
+      {:ok, ctx} = click(toggle(), "#lock")
+      assert {:ok, ctx} = change(ctx, "#name-form", %{name: "cy"})
+      assert project_dom(ctx)["name"] == "typing:cy"
+    end
+
+    test "a missing form is not available" do
+      assert {:rejected, {:not_available, "#nope"}, _} = submit(toggle(), "#nope", %{})
+    end
+  end
+
+  describe "async settling" do
+    test "start_async results land before the helper returns" do
+      assert {:ok, ctx} = click(toggle(), "#slow")
+      assert project_dom(ctx)["slow"] == "finished"
+    end
+  end
+
+  describe "project_dom/1 and project_assigns/2" do
+    test "projects every marker" do
+      assert project_dom(toggle()) == %{"on" => false, "name" => "", "slow" => "idle"}
+    end
+
+    test "a bad marker throws :invalid_projection for the runner" do
+      ctx = %{toggle() | view: nil, html: ~s(<span data-outlaw-var="x"></span>)}
+
+      assert {:outlaw_fail, :invalid_projection, %{variable: "x", message: _}} =
+               catch_throw(project_dom(ctx))
+    end
+
+    test "project_assigns reads the given assigns as string keys" do
+      {:ok, ctx} = click(toggle(), "#flip")
+      assert project_assigns(ctx, [:on, :name]) == %{"on" => true, "name" => ""}
+    end
+  end
 end
 
 defmodule Outlaw.Conformance.LiveViewConfigTest do
