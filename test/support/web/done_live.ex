@@ -1,6 +1,6 @@
 defmodule Outlaw.Fixtures.Web.DoneLive do
   @moduledoc false
-  use Phoenix.LiveView
+  use Phoenix.LiveView, log: false
 
   def mount(_params, _session, socket), do: {:ok, socket}
 

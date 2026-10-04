@@ -8,7 +8,7 @@ defmodule Outlaw.Fixtures.Web.Router do
     plug(:fetch_live_flash)
   end
 
-  scope "/" do
+  scope "/", log: false do
     pipe_through(:browser)
 
     live("/toggle", Outlaw.Fixtures.Web.ToggleLive)
