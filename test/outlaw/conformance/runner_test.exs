@@ -610,6 +610,29 @@ defmodule Outlaw.Conformance.RunnerTest do
     {:ok, graph} = Outlaw.StateGraph.parse_dot(dot)
     graph
   end
+
+  describe "LiveView wizard (design spec §8, §11)" do
+    test "the correct wizard passes with full action coverage" do
+      assert {:ok, %{coverage: coverage}} = check(Fixtures.WizardSpec, "Wizard")
+      assert coverage.actions.unreached == []
+    end
+
+    test "the routed wizard (redirects) passes" do
+      assert {:ok, _} = check(Fixtures.WizardRedirectSpec, "Wizard", max_runs: 50)
+    end
+
+    test "Pay offered before the payment step fails with action_not_enabled" do
+      assert {:error, %Failure{kind: :action_not_enabled, steps: steps}} =
+               check(Fixtures.WizardEarlyPaySpec, "Wizard")
+
+      assert List.last(steps).action == "Pay"
+    end
+
+    test "Pay never offered fails with action_not_offered and the selector" do
+      assert {:error, %Failure{kind: :action_not_offered, details: %{selector: "#pay"}}} =
+               check(Fixtures.WizardNoPaySpec, "Wizard")
+    end
+  end
 end
 
 defmodule Outlaw.Conformance.RunnerTest.HiddenGo do
