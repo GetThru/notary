@@ -551,4 +551,79 @@ defmodule Outlaw.Conformance.RunnerTest do
       assert Enum.all?(steps, &(&1 == {"Inc", %{}}))
     end
   end
+
+  describe "action_not_offered (design spec §8.4)" do
+    test "a :not_available rejection of an action the spec allows everywhere here fails" do
+      assert {:error,
+              %Failure{kind: :action_not_offered, details: details, steps: steps} = failure} =
+               check(Fixtures.CounterNotOfferedSpec, "Counter")
+
+      assert details.selector == "#inc"
+      assert List.last(steps).action == "Inc"
+      assert List.last(steps).outcome == {:rejected, {:not_available, "#inc"}}
+      assert Outlaw.Report.format_failure("Counter", failure) =~ "selector: #inc"
+    end
+
+    test "other rejection reasons keep the old semantics" do
+      assert {:ok, _} = check(Fixtures.CounterSpec, "Counter")
+    end
+
+    test "passes when only some candidates enable the action (hidden variable)" do
+      assert {:ok, _} =
+               Runner.check(Outlaw.Conformance.RunnerTest.HiddenGo, hidden_graph(), ["x"],
+                 seed: 1,
+                 max_runs: 30
+               )
+    end
+
+    test "fails when every candidate enables it" do
+      assert {:error, %Failure{kind: :action_not_offered}} =
+               Runner.check(
+                 Outlaw.Conformance.RunnerTest.HiddenGo,
+                 hidden_graph(both_go: true),
+                 ["x"],
+                 seed: 1,
+                 max_runs: 30
+               )
+    end
+  end
+
+  defp hidden_graph(opts \\ []) do
+    extra =
+      if opts[:both_go],
+        do: ~s(2 -> 3 [label="Go",color="black",fontcolor="black"];\n),
+        else: ""
+
+    dot = """
+    strict digraph DiskGraph {
+    nodesep=0.35;
+    subgraph cluster_graph {
+    color="white";
+    1 [label="/\\\\ h = 0\\n/\\\\ x = 0",style = filled]
+    2 [label="/\\\\ h = 1\\n/\\\\ x = 0",style = filled]
+    3 [label="/\\\\ h = 0\\n/\\\\ x = 1"]
+    1 -> 3 [label="Go",color="black",fontcolor="black"];
+    #{extra}}
+    }
+    """
+
+    {:ok, graph} = Outlaw.StateGraph.parse_dot(dot)
+    graph
+  end
+end
+
+defmodule Outlaw.Conformance.RunnerTest.HiddenGo do
+  @moduledoc false
+  # Never offers Go. With observe: ["x"], x = 0 leaves candidates h = 0 (Go
+  # enabled) and h = 1 (Go not enabled, unless both_go).
+  use Outlaw.Conformance,
+    spec: "unused.tla",
+    observe: ["x"],
+    discover: false,
+    generation: :uniform
+
+  def init, do: {:ok, nil}
+  def actions, do: %{"Go" => StreamData.constant(%{})}
+  def action("Go", _, ctx), do: {:rejected, {:not_available, "#go"}, ctx}
+  def project(_), do: %{"x" => 0}
 end

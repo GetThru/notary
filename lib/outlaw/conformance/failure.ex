@@ -9,6 +9,7 @@ defmodule Outlaw.Conformance.Failure do
           :init_mismatch
           | :illegal_transition
           | :action_not_enabled
+          | :action_not_offered
           | :rejected_with_side_effect
           | :invalid_projection
           | :invalid_action_result
@@ -26,6 +27,8 @@ defmodule Outlaw.Conformance.Failure do
       "The implementation's new state is not one the spec allows after this action.",
     action_not_enabled:
       "The implementation accepted an action the spec does not allow in this state. It should have returned {:rejected, reason, ctx}.",
+    action_not_offered:
+      "The spec allows this action here, but the UI did not offer it (the element was missing or disabled).",
     rejected_with_side_effect:
       "The implementation rejected the action, but its observable state changed.",
     invalid_projection:

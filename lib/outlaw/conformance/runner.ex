@@ -14,6 +14,7 @@ defmodule Outlaw.Conformance.Runner do
     :init_mismatch,
     :illegal_transition,
     :action_not_enabled,
+    :action_not_offered,
     :rejected_with_side_effect
   ]
 
@@ -102,7 +103,7 @@ defmodule Outlaw.Conformance.Runner do
 
   A candidate "still fails" only if its replay fails with the original
   failure's kind, or both kinds are spec-level (`:init_mismatch`,
-  `:illegal_transition`, `:action_not_enabled`,
+  `:illegal_transition`, `:action_not_enabled`, `:action_not_offered`,
   `:rejected_with_side_effect`): e.g. an `:illegal_transition` that needed a
   preceding step can become an `:action_not_enabled` without it, but a spec
   violation is never traded for a `:timeout`, `:crashed`, `:exception` or
@@ -575,9 +576,16 @@ defmodule Outlaw.Conformance.Runner do
            }}
         )
 
-        if next == [],
-          do: {{:fail, :rejected_with_side_effect, %{}}, ctx, i, []},
-          else: walk(w, rest, i + 1, ctx, next)
+        cond do
+          not_available?(reason) and offered_everywhere?(graph, closed, name) ->
+            {{:fail, :action_not_offered, not_offered_details(reason)}, ctx, i, []}
+
+          next == [] ->
+            {{:fail, :rejected_with_side_effect, %{}}, ctx, i, []}
+
+          true ->
+            walk(w, rest, i + 1, ctx, next)
+        end
 
       other ->
         throw({:outlaw_fail, :invalid_action_result, %{got: inspect(other)}})
@@ -628,6 +636,19 @@ defmodule Outlaw.Conformance.Runner do
   end
 
   defp observed(graph, id, observe), do: graph |> StateGraph.state(id) |> Map.take(observe)
+
+  # Design spec §8.4: a UI must offer what the spec allows. Only when *every*
+  # candidate enables the action (hidden variables can leave candidates that
+  # disagree, and then the UI may legitimately not offer it).
+  defp not_available?(:not_available), do: true
+  defp not_available?({:not_available, _}), do: true
+  defp not_available?(_), do: false
+
+  defp offered_everywhere?(graph, closed, name),
+    do: Enum.all?(closed, &(StateGraph.successors(graph, &1, name) != []))
+
+  defp not_offered_details({:not_available, selector}), do: %{selector: selector}
+  defp not_offered_details(:not_available), do: %{}
 
   # -- internal actions / settle (Outlaw design spec §4.3, §5) -----------------
 

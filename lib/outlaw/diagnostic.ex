@@ -31,8 +31,9 @@ defmodule Outlaw.Diagnostic do
     * `:mapping` -- the mapping module, or `nil` if unknown. Required for the
       kinds that point into the mapping's own source
       (`invalid_projection`, `invalid_action_result`, `timeout`, `crashed`);
-      spec-only kinds (`action_not_enabled`, `illegal_transition`,
-      `rejected_with_side_effect`, `init_mismatch`, `internal_action_stalled`)
+      spec-only kinds (`action_not_enabled`, `action_not_offered`,
+      `illegal_transition`, `rejected_with_side_effect`, `init_mismatch`,
+      `internal_action_stalled`)
       never need it. `exception` needs neither -- it uses the raw
       `{file, line}` frame the runner already captured.
   """
@@ -114,6 +115,9 @@ defmodule Outlaw.Diagnostic do
   defp build(%Failure{kind: :action_not_enabled} = f, spec, _mapping),
     do: action_not_enabled(f, spec)
 
+  defp build(%Failure{kind: :action_not_offered} = f, spec, _mapping),
+    do: action_not_offered(f, spec)
+
   defp build(%Failure{kind: :illegal_transition} = f, spec, _mapping),
     do: illegal_transition(f, spec)
 
@@ -172,6 +176,38 @@ defmodule Outlaw.Diagnostic do
         |> base_report(rel)
         |> PReport.with_labels(labels)
         |> PReport.with_help("return {:rejected, reason, ctx}")
+
+      {report, %{rel => text}}
+    else
+      _ -> nil
+    end
+  end
+
+  # -- action_not_offered (design spec §8.4) ---------------------------------------
+
+  defp action_not_offered(f, spec) do
+    with {:ok, rel, text} <- spec_source(spec),
+         action when is_binary(action) <- List.last(f.steps).action,
+         %{} = def_ <- SpecLocate.definition(text, action) do
+      guards = Enum.filter(def_.conjuncts, &(&1.kind == :guard))
+      state = pre_state(f)
+
+      labels =
+        case guards do
+          [] ->
+            [definition_fallback_label(def_, text, "enabled in #{format_state(state)}")]
+
+          several ->
+            Enum.map(several, &conjunct_label(&1, :primary, "true here: #{format_state(state)}"))
+        end
+
+      what = if f.details[:selector], do: "#{inspect(f.details.selector)} was", else: "it was"
+
+      report =
+        f
+        |> base_report(rel)
+        |> PReport.with_labels(labels)
+        |> PReport.with_help("the UI must offer #{action} here; #{what} missing or disabled")
 
       {report, %{rel => text}}
     else
@@ -497,6 +533,11 @@ defmodule Outlaw.Diagnostic do
   defp headline(%Failure{kind: :action_not_enabled} = f) do
     action = List.last(f.steps).action || "the action"
     "#{action} was accepted, but the spec doesn't allow it in #{format_state(pre_state(f))}"
+  end
+
+  defp headline(%Failure{kind: :action_not_offered} = f) do
+    action = List.last(f.steps).action || "the action"
+    "#{action} was not offered, but the spec allows it in #{format_state(pre_state(f))}"
   end
 
   defp headline(%Failure{kind: :illegal_transition} = f) do

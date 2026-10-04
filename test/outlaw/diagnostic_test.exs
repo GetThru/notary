@@ -51,6 +51,16 @@ defmodule Outlaw.DiagnosticTest do
     assert text =~ "help: return {:rejected, reason, ctx}"
   end
 
+  test "action_not_offered points at the guard that made it enabled and names the selector" do
+    text = render(Fixtures.CounterNotOfferedSpec, "Counter")
+
+    assert text =~ "error[action_not_offered]"
+    assert text =~ "Inc was not offered, but the spec allows it in x = "
+    assert text =~ "test/fixtures/specs/Counter.tla:10:11"
+    assert text =~ "true here: x = "
+    assert text =~ "help: the UI must offer Inc here; \"#inc\" was missing or disabled"
+  end
+
   test "illegal_transition falls back to the Reset == line when the body has no /\\ list" do
     text = render(Fixtures.CounterBadResetSpec, "Counter")
 

@@ -223,6 +223,23 @@ defmodule Outlaw.Fixtures.CounterUniformSpec do
   defdelegate teardown(pid), to: Outlaw.Fixtures.CounterSpec
 end
 
+defmodule Outlaw.Fixtures.CounterNotOfferedSpec do
+  @moduledoc false
+  # Bug: the "UI" never offers Inc, although the spec allows it below Max.
+  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+
+  def init, do: Agent.start_link(fn -> 0 end)
+  def actions, do: %{"Inc" => StreamData.constant(%{}), "Reset" => StreamData.constant(%{})}
+  def action("Inc", _, pid), do: {:rejected, {:not_available, "#inc"}, pid}
+
+  def action("Reset", _, pid) do
+    Agent.update(pid, fn _ -> 0 end)
+    {:ok, pid}
+  end
+
+  def project(pid), do: %{"x" => Agent.get(pid, & &1)}
+end
+
 defmodule Outlaw.Fixtures.CounterBadGenerationSpec do
   @moduledoc false
   # Invalid mapping: generation: must be :walk or :uniform.
