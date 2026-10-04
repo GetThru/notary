@@ -570,7 +570,7 @@ defmodule Outlaw.Conformance.RunnerTest do
 
     test "passes when only some candidates enable the action (hidden variable)" do
       assert {:ok, _} =
-               Runner.check(Outlaw.Conformance.RunnerTest.HiddenGo, hidden_graph(), ["x"],
+               Runner.check(Fixtures.HiddenGoSpec, hidden_graph(), ["x"],
                  seed: 1,
                  max_runs: 30
                )
@@ -579,7 +579,7 @@ defmodule Outlaw.Conformance.RunnerTest do
     test "fails when every candidate enables it" do
       assert {:error, %Failure{kind: :action_not_offered}} =
                Runner.check(
-                 Outlaw.Conformance.RunnerTest.HiddenGo,
+                 Fixtures.HiddenGoSpec,
                  hidden_graph(both_go: true),
                  ["x"],
                  seed: 1,
@@ -633,20 +633,4 @@ defmodule Outlaw.Conformance.RunnerTest do
                check(Fixtures.WizardNoPaySpec, "Wizard")
     end
   end
-end
-
-defmodule Outlaw.Conformance.RunnerTest.HiddenGo do
-  @moduledoc false
-  # Never offers Go. With observe: ["x"], x = 0 leaves candidates h = 0 (Go
-  # enabled) and h = 1 (Go not enabled, unless both_go).
-  use Outlaw.Conformance,
-    spec: "unused.tla",
-    observe: ["x"],
-    discover: false,
-    generation: :uniform
-
-  def init, do: {:ok, nil}
-  def actions, do: %{"Go" => StreamData.constant(%{})}
-  def action("Go", _, ctx), do: {:rejected, {:not_available, "#go"}, ctx}
-  def project(_), do: %{"x" => 0}
 end
