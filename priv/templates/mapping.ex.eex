@@ -14,6 +14,13 @@ defmodule <%= @module %> do
     raise "implement init/0 for <%= @name %>"
   end
 
+  # Driving a LiveView? import Outlaw.Conformance.LiveView and use:
+  #   def init, do: mount(MyAppWeb.SomeLive, endpoint: MyAppWeb.Endpoint)
+  #   def action("Pay", _, ctx), do: click(ctx, "#pay")
+  #   def project(ctx), do: project_dom(ctx)
+  #   def teardown(ctx), do: unmount(ctx)
+  # See the LiveView guide.
+
   @impl true
   def actions do
     # One entry per spec action: name => StreamData generator of params.

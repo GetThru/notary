@@ -175,6 +175,37 @@ use Outlaw.Conformance, spec: "specs/Bank.tla", generation: :uniform
 `:uniform` is useful as a baseline when comparing behavior, or while
 narrowing down whether a failure is particular to the walk's targeting.
 
+### LiveView
+
+`Outlaw.Conformance.LiveView` adds helpers for mapping modules that drive a
+Phoenix LiveView instead of calling functions directly:
+
+```elixir
+defmodule MyAppWeb.Specs.Wizard do
+  use Outlaw.Conformance, spec: "specs/Wizard.tla"
+  import Outlaw.Conformance.LiveView
+
+  def init, do: mount(MyAppWeb.WizardLive, endpoint: MyAppWeb.Endpoint)
+  def action("Pay", _, ctx), do: click(ctx, "#pay")
+  def project(ctx), do: project_dom(ctx)
+  def teardown(ctx), do: unmount(ctx)
+end
+```
+
+Two rules are enforced: the UI must not offer what the spec forbids
+(`action_not_enabled`, same as any mapping), and it must also *offer* what
+the spec allows (`action_not_offered` — a missing or disabled element where
+the spec says the action should be possible). Variables are read from the
+rendered HTML via a `data-outlaw-var`/`data-outlaw-json` (or
+`data-outlaw-value`) markup convention in your own templates — no Outlaw code
+in app templates, since Outlaw is a `:dev`/`:test` dependency. See the
+[LiveView guide](guides/liveview.md) for the full walkthrough.
+
+Measured on a three-step checkout wizard (seeds 1..10, default 100 runs,
+`specs/Wizard.tla`): offering a forbidden action one step early is caught by
+`action_not_enabled` on 10/10 seeds, and never offering an allowed action is
+caught by `action_not_offered` on 10/10 seeds.
+
 ## Seeing the state space
 
 ```bash
@@ -189,6 +220,11 @@ Actions are driven sequentially, so code-level races are not exercised. TLC
 still checks the design across all interleavings. Liveness is checked only on
 the spec, plus the bounded settle check for fair internal actions (above).
 Keep `.cfg` constants small.
+
+LiveView mappings (above) are single view, single actor (Phase 2a): no
+PubSub from other processes, no JS hooks, and `render_async/2` settles only
+the top-level view, not nested child LiveViews. Multi-view, multi-actor and
+PubSub settling are Phase 2b.
 
 The compiler-style diagnostic is a syntactic pointer, not a TLA+ evaluator, so
 it can overclaim: a labelled effect conjunct might actually *disable* the
