@@ -20,7 +20,9 @@ You need:
 
 - Elixir 1.18 or newer.
 - Java 11 or newer, to run the TLA+ model checker (TLC). Check with
-  `java -version`.
+  `java -version`. If you use Nix, Outlaw's flake can provide Java and the
+  TLA+ tools jar for you: see "Using Nix" in the README. Then you can skip
+  `mix outlaw.install` in step 2.
 - A local copy of Outlaw. It isn't published to Hex yet, so this guide
   depends on it by path. The examples assume it lives next to your project,
   at `../outlaw`.

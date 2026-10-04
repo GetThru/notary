@@ -29,8 +29,70 @@ defp elixirc_paths(_), do: ["lib"]
 
 ```bash
 mix deps.get
-mix outlaw.install      # pinned tla2tools.jar; needs Java >= 11 (or use this repo's nix flake)
+mix outlaw.install      # pinned tla2tools.jar; needs Java >= 11
 ```
+
+Using Nix? See [Using Nix](#using-nix): the flake provides Java and the jar,
+so you can skip `mix outlaw.install`.
+
+### Using Nix
+
+Outlaw needs two things a normal Elixir setup doesn't have: **Java** (11 or
+newer) and the pinned **TLA+ tools jar**. The flake in this repository
+provides both:
+
+- **`packages.tla2tools`** is the pinned jar, fetched and checksum-verified
+  by nix.
+- **`devShells.tools`** adds Java and exports `OUTLAW_TLA2TOOLS`, pointing
+  at that jar. It contains nothing else, so it layers onto whatever Elixir
+  you already use.
+
+Outlaw finds the jar in this order: `config :outlaw, tla2tools_path:`, then
+the `OUTLAW_TLA2TOOLS` environment variable, then
+`_build/outlaw/tla2tools.jar` (where `mix outlaw.install` puts it). With the
+flake's shell active, `mix outlaw.install` has nothing to download; it just
+confirms the jar and Java.
+
+**If your project has its own `flake.nix`**, add Outlaw as an input and pull
+its tools shell into yours:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    flake-utils.url = "github:numtide/flake-utils";
+    outlaw.url = "git+file:///path/to/outlaw";  # until Outlaw has a public repo
+  };
+
+  outputs = { nixpkgs, flake-utils, outlaw, ... }:
+    flake-utils.lib.eachDefaultSystem (system:
+      let pkgs = import nixpkgs { inherit system; };
+      in {
+        devShells.default = pkgs.mkShell {
+          # Java and the TLA+ tools jar for Outlaw.
+          inputsFrom = [ outlaw.devShells.${system}.tools ];
+          # Your project's own toolchain.
+          packages = [ pkgs.beam.packages.erlang_27.elixir_1_19 ];
+        };
+      });
+}
+```
+
+Then `nix develop` and use `mix outlaw.*` as usual.
+
+**If it doesn't**, borrow the tools shell for a session, from your project
+directory. Elixir comes from wherever you normally get it:
+
+```console
+$ nix develop /path/to/outlaw#tools
+$ mix outlaw.verify
+```
+
+Or for a single command: `nix develop /path/to/outlaw#tools -c mix outlaw.verify`.
+
+Don't use the flake's *default* shell for your project. That shell is for
+working on Outlaw itself: it pins Elixir 1.19 and points `MIX_HOME` and
+`HEX_HOME` at folders in the current directory.
 
 ## Workflow
 
@@ -182,8 +244,8 @@ task at all, only as an opt to `Outlaw.Conformance.Runner.check/4` directly.
 ## Developing Outlaw
 
 ```bash
-nix develop
-mix deps.get && mix run -e 'Outlaw.Tools.install()'
+nix develop                            # Elixir, Java and the TLA+ jar (no install step)
+mix deps.get
 mix test --include tlc                 # add --include e2e for the end-to-end test
 mix outlaw.verify --max-runs 1000
 mix run test/fixtures/regen_graphs.exs # after changing fixture specs
