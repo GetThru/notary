@@ -45,6 +45,11 @@ config :outlaw, endpoint: MyAppWeb.Endpoint
 config means your mapping's `init/0` doesn't have to pass `endpoint:` on
 every call (you still can, to override it).
 
+The helpers exist only when both `phoenix_live_view` and `lazy_html` are
+available in the environment Outlaw is compiled in (usually `:test`).
+Otherwise `Outlaw.Conformance.LiveView` is never defined, and a mapping that
+imports it fails with "module Outlaw.Conformance.LiveView is not loaded".
+
 Nothing in your application's own templates needs to depend on Outlaw: see
 "Markup" below.
 
@@ -125,7 +130,9 @@ attribute. In `MyAppWeb.WizardLive`'s template:
 
 - `data-outlaw-json` is decoded with Elixir's built-in `JSON`. Strings,
   integers, booleans, arrays and objects with string keys all work directly;
-  `null` and floats don't map onto TLA+ values. (`data-outlaw-value`, TLC
+  `null` and floats don't map onto TLA+ values. An empty object `{}` is the
+  empty sequence/function `<<>>` (TLC prints both the same way), so an empty
+  map compares equal to the spec's `<<>>`. (`data-outlaw-value`, TLC
   syntax parsed by `Outlaw.Value`, exists for sets and model values that JSON
   can't express — not needed here.)
 - There's no Outlaw helper or import in the template. Outlaw is a
@@ -231,9 +238,12 @@ A few things worth calling out:
 - **`teardown(ctx), do: unmount(ctx)` matters.** `mount/2` can be called
   outside an ExUnit test process (conformance runs happen in their own
   process, and `mix outlaw.verify` doesn't start ExUnit at all), so it
-  registers an ExUnit test supervisor itself when needed. `unmount/1` cleans
-  that up; call it from `teardown/1` or that supervisor leaks for the life of
-  the run.
+  registers the calling process with ExUnit itself when needed. `unmount/1`
+  cleans that up, and is safe to call more than once. Without it, the
+  runner still stops the run's linked processes (the test supervisor and the
+  LiveView with it), but the registration's row in ExUnit's internal table
+  stays for the life of the VM. `teardown/1` is skipped on some failure
+  paths, so a few such rows can remain anyway: a small, bounded leak.
 - **Async work is settled automatically.** After every `click`/`submit`/
   `change`, and again whenever a view is installed (the first `mount`, or the
   target of a redirect), the helpers call `render_async/2` so that
@@ -290,7 +300,7 @@ Wizard: FAIL
        ╭─[specs/Wizard.tla:27:11]
        │
     25 │         /\ UNCHANGED address
-    26 │
+    26 │ 
     27 │ Pay == /\ step = "payment"
        •           ───────┬────────
        •                  ╰── one of these is false in address = FALSE, step = "address"
@@ -302,17 +312,17 @@ Wizard: FAIL
        │
        ╰─────
          help: return {:rejected, reason, ctx}
-
+    
     Conformance failure in Wizard: action_not_enabled (seed 1)
     The implementation accepted an action the spec does not allow in this state. It should have returned {:rejected, reason, ctx}.
-
+    
       step  action / params / outcome / implementation state
       0     (init)   ok          address = FALSE, step = "address"
       1     Pay %{}  ok          address = FALSE, step = "done"   <-- diverges here
-
+    
     Spec allowed: (no Pay transition is enabled here)
     minimized: 3 replays, 1 items removed, 0 params reduced
-
+    
     Reproduce: mix outlaw.test Wizard --seed 1
     Visualize: mix outlaw.graph Wizard --trace failure --open
 
@@ -338,7 +348,7 @@ Wizard: FAIL
        ╭─[specs/Wizard.tla:27:11]
        │
     25 │         /\ UNCHANGED address
-    26 │
+    26 │ 
     27 │ Pay == /\ step = "payment"
        •           ───────┬────────
        •                  ╰── true here: address = TRUE, step = "payment"
@@ -350,20 +360,20 @@ Wizard: FAIL
        │
        ╰─────
          help: the UI must offer Pay here; "#pay" was missing or disabled
-
+    
     Conformance failure in Wizard: action_not_offered (seed 1)
     The spec allows this action here, but the UI did not offer it (the element was missing or disabled).
-
+    
       step  action / params / outcome / implementation state
       0     (init)            ok          address = FALSE, step = "address"
       1     EnterAddress %{}  ok          address = TRUE, step = "address"
       2     Continue %{}      ok          address = TRUE, step = "payment"
       3     Pay %{}           rejected {:not_available, "#pay"}  address = TRUE, step = "payment"   <-- diverges here
-
+    
     Spec allowed: address = TRUE, step = "payment"
     minimized: 3 replays, 0 items removed, 0 params reduced
     selector: #pay
-
+    
     Reproduce: mix outlaw.test Wizard --seed 1
     Visualize: mix outlaw.graph Wizard --trace failure --open
 
@@ -396,10 +406,16 @@ missing element. Measured the same way, this bug is caught on 10/10 seeds.
   documented as unstable for exactly that reason. Prefer `project_dom/1`
   (the markup convention above); reach for `project_assigns/2` only when a
   variable truly can't be rendered.
-- **The helpers call undocumented `Phoenix.LiveViewTest` functions**
-  (`__live__/3`, `__isolated__/4`, `__follow_redirect__/4`) to mount and
-  follow redirects outside of ExUnit's own test lifecycle. They're internal
-  LiveViewTest APIs, not part of its public contract.
+- **The helpers rely on internals of LiveViewTest and ExUnit.** They call
+  undocumented `Phoenix.LiveViewTest` functions (`__live__/3`,
+  `__isolated__/4`, `__follow_redirect__/4`) to mount and follow redirects
+  outside of ExUnit's own test lifecycle, and they register the run's process
+  with ExUnit's internal OnExitHandler table so LiveViewTest accepts it as
+  a test process. None of these are part of a public contract.
+- **The availability check is simple.** It looks at the matched element's
+  own `disabled` attribute and, for `submit/3`, at the submit buttons inside
+  the form. It does not consider a submit button outside the form
+  (`form="id"`), `input[type=image]`, or `fieldset[disabled]`.
 
 ## Next steps
 

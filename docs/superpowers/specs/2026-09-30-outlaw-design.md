@@ -558,6 +558,7 @@ attribute:
   - Strings, integers and booleans map directly.
   - Arrays are sequences.
   - Objects are records with string keys.
+  - An empty object is the empty sequence/function `<<>>`.
   - `null` and floats are `:invalid_projection`.
 - **`data-outlaw-value`** is TLC syntax, parsed by `Outlaw.Value`. It is used
   for sets and model values, which JSON cannot express.

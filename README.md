@@ -202,9 +202,10 @@ in app templates, since Outlaw is a `:dev`/`:test` dependency. See the
 [LiveView guide](guides/liveview.md) for the full walkthrough.
 
 Measured on a three-step checkout wizard (seeds 1..10, default 100 runs,
-`specs/Wizard.tla`): offering a forbidden action one step early is caught by
-`action_not_enabled` on 10/10 seeds, and never offering an allowed action is
-caught by `action_not_offered` on 10/10 seeds.
+spec `test/fixtures/specs/Wizard.tla`, script
+`test/fixtures/measure_wizard.exs`): offering a forbidden action one step
+early is caught by `action_not_enabled` on 10/10 seeds, and never offering an
+allowed action is caught by `action_not_offered` on 10/10 seeds.
 
 ## Seeing the state space
 
