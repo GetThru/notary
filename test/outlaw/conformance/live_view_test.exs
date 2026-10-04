@@ -55,6 +55,17 @@ defmodule Outlaw.Conformance.LiveViewTest do
       assert project_dom(ctx) == %{"page" => "plain"}
       assert {:rejected, {:not_available, "#flip"}, _} = click(ctx, "#flip")
     end
+
+    test "a redirect target settles its async mount work before projection" do
+      {:ok, ctx} = mount("/toggle", endpoint: Endpoint)
+      assert {:ok, ctx} = click(ctx, "#go-async")
+      assert project_dom(ctx) == %{"status" => "loaded"}
+    end
+
+    test "mounting an async LiveView directly also settles before projection" do
+      assert {:ok, ctx} = mount("/async", endpoint: Endpoint)
+      assert project_dom(ctx) == %{"status" => "loaded"}
+    end
   end
 
   describe "click/2" do

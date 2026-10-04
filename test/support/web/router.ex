@@ -13,6 +13,7 @@ defmodule Outlaw.Fixtures.Web.Router do
 
     live("/toggle", Outlaw.Fixtures.Web.ToggleLive)
     live("/done", Outlaw.Fixtures.Web.DoneLive)
+    live("/async", Outlaw.Fixtures.Web.AsyncLive)
     get("/plain", Outlaw.Fixtures.Web.PageController, :plain)
   end
 end

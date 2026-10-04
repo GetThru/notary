@@ -28,6 +28,7 @@ defmodule Outlaw.Fixtures.Web.ToggleLive do
       <button id="slow" phx-click="slow">Slow</button>
       <button id="go" phx-click="go">Go</button>
       <button id="leave" phx-click="leave">Leave</button>
+      <button id="go-async" phx-click="go-async">Go async</button>
     </div>
     """
   end
@@ -42,6 +43,7 @@ defmodule Outlaw.Fixtures.Web.ToggleLive do
 
   def handle_event("go", _, socket), do: {:noreply, push_navigate(socket, to: "/done")}
   def handle_event("leave", _, socket), do: {:noreply, redirect(socket, to: "/plain")}
+  def handle_event("go-async", _, socket), do: {:noreply, push_navigate(socket, to: "/async")}
 
   def handle_event("slow", _, socket) do
     {:noreply,

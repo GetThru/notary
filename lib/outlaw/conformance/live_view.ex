@@ -133,8 +133,10 @@ if Code.ensure_loaded?(Phoenix.LiveViewTest) and Code.ensure_loaded?(LazyHTML) d
 
     defp put_result(ctx, result, hops \\ @max_redirects)
 
-    defp put_result(ctx, {:live, conn, view, html}, _hops),
-      do: %{ctx | conn: conn, view: view, html: html}
+    defp put_result(ctx, {:live, conn, view, html}, _hops) do
+      Phoenix.LiveViewTest.render_async(view, Outlaw.Config.get(:settle_timeout))
+      %{ctx | conn: conn, view: view, html: html}
+    end
 
     defp put_result(ctx, {:static, conn, html}, _hops),
       do: %{ctx | conn: conn, view: nil, html: html}
