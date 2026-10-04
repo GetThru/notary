@@ -68,7 +68,7 @@ Outlaw is a Hex package used as a `:dev`/`:test` dependency.
 | `Outlaw.Conformance.Runner` | The StreamData property: drive, project, check, shrink, report. |
 | `Outlaw.Report` | Human-readable and JSON rendering of results and failures. |
 | `Outlaw.Viewer` | Generate the self-contained HTML graph viewer and Mermaid output (§6). |
-| `Outlaw.Conformance.LiveView` | Phase 2. LiveView driving/projection helpers (§8). |
+| `Outlaw.Conformance.LiveView` | Phase 2. LiveView driving/projection helpers (§8); with `.Ctx` and `.Dom`. |
 
 ### 3.1 TLC values
 
@@ -257,7 +257,9 @@ it is `S` itself, and the rules below reduce to the Phase 1 semantics.
      (`:illegal_transition`).
    - **Rejected** `{:rejected, _, ctx}`: `p' := project(ctx)`;
      `C := {t ∈ B : observed(t) = p'}` (an internal step may have happened
-     meanwhile). Empty → fail (`:rejected_with_side_effect`).
+     meanwhile). Empty → fail (`:rejected_with_side_effect`). If the reason is
+     `:not_available` or `{:not_available, _}` and every state in `B` enables
+     `name`, fail first with `:action_not_offered` (§8.4).
 4. If internal actions are declared: settle (§4.3).
 5. `teardown/1`.
 
@@ -431,39 +433,157 @@ both the tool output and the diff.
 
 ## 8. Phase 2: LiveView conformance
 
-`Outlaw.Conformance.LiveView` is compiled only when `phoenix_live_view` is
-available. It reuses the runner; only driving and projection differ.
+Phase 2 is delivered in two slices:
 
-**Driving.** `init/0` builds a conn and calls `live(conn, path)`. ctx holds the
-view, or a map of views per actor (`%{u1: view1, u2: view2}`) for multi-user
-specs. Helpers return the runner contract:
+- **Phase 2a (this section): a single view and a single actor.** No multi-view
+  settling.
+- **Phase 2b: multi-view, multi-actor and PubSub settling.** It is spec-first:
+  the human writes a spec of the driver/settle protocol before Phase 2b code
+  exists (§12).
+
+### 8.1 Shape
+
+LiveView support is a set of **helpers on the existing mapping contract (§4)**.
+It is not a separate runner and not a declarative action table. A LiveView
+mapping is an ordinary `use Outlaw.Conformance` module that
+`import`s `Outlaw.Conformance.LiveView`:
 
 ```elixir
-def action("AddItem", %{sku: s}, ctx), do: click(ctx, "[data-sku=#{s}] button")
-def action("Pay", _, ctx),            do: submit(ctx, "#payment-form", %{card: "ok"})
+defmodule MyAppWeb.Specs.Wizard do
+  use Outlaw.Conformance, spec: "specs/Wizard.tla"
+  import Outlaw.Conformance.LiveView
+
+  def init, do: mount(MyAppWeb.WizardLive, endpoint: MyAppWeb.Endpoint)
+
+  def actions, do: %{"EnterAddress" => StreamData.constant(%{}), "Next" => ..., "Pay" => ...}
+
+  def action("EnterAddress", _, ctx), do: submit(ctx, "#address-form", %{address: "1 Main St"})
+  def action("Next", _, ctx), do: click(ctx, "#next")
+  def action("Pay", _, ctx), do: click(ctx, "#pay")
+
+  def project(ctx), do: project_dom(ctx)
+end
 ```
 
-`click/3,4`, `submit/4,5`, `change/4,5` (optional actor argument). A target
-element that is **missing or `disabled`** yields `{:rejected, :not_available, ctx}`
-— so "spec says not enabled" becomes "the UI must not offer it." Redirects and
-live navigation are followed automatically, replacing the view in ctx.
+Dependencies:
 
-**Observing.** Primary: markup convention
-`<span data-outlaw-var="step" data-outlaw-value="payment">`; `project_dom/1`
-collects every `[data-outlaw-var]` across views and parses values with
-`Outlaw.Value`. Escape hatch: `project_assigns/1` reads socket assigns
-(documented as depending on LiveView internals).
+- `{:phoenix_live_view, "~> 1.2", optional: true}`.
+- Outlaw's own test environment also needs `phoenix` and `lazy_html`.
+- `Outlaw.Conformance.LiveView` is compiled only when `Phoenix.LiveViewTest` is
+  available (`if Code.ensure_loaded?/1`).
 
-**Settling.** After each action the runner settles every view (`render_async` +
-`render`) so PubSub / `handle_info` updates from other actors land before
-projection. Settle timeout (default 1s) is a failure (`:settle_timeout`), never a
-pass.
+The runner, Walk, shrinking, minimization, coverage, diagnostics and mix tasks
+are unchanged, except for the availability rule in §8.4.
 
-**Database.** Helpers check out an Ecto sandbox per run in `init`, allow the
-LiveView processes, and check in on `teardown`.
+### 8.2 Modules
 
-**Limit.** Server-side LiveView behavior only; JS hooks / `JS.*` client commands
-are not exercised.
+| Module | Responsibility |
+|---|---|
+| `Outlaw.Conformance.LiveView` | Helpers: `mount/2`, `click/2`, `submit/3`, `change/3`, `project_dom/1`, `project_assigns/2`, and the `outlaw_var/1` function component. |
+| `Outlaw.Conformance.LiveView.Ctx` | `%Ctx{conn, view, html, endpoint, assigns}`. `view` is the current `Phoenix.LiveViewTest.View`, or `nil` after a redirect to a page that isn't a LiveView, where `html` holds that page. `assigns` is free space for the mapping, e.g. a stub's pid. |
+| `Outlaw.Conformance.LiveView.Dom` | Pure function: rendered HTML → `%{var => value}`. Unit-tested without any LiveView process. |
+
+### 8.3 Driving
+
+- **`mount(path_or_module, opts)`.**
+  - It builds a conn for `opts[:endpoint]`, or `config :outlaw, endpoint:` if
+    that's not given.
+  - A path is mounted with `live(conn, path)`, which requires a router. A module
+    is mounted with `live_isolated(conn, module, session: opts[:session])`.
+  - It returns `{:ok, %Ctx{}}`.
+- **Availability.** `click(ctx, selector)`, `submit(ctx, form_selector, values)`
+  and `change(ctx, form_selector, values)` first check that the target is
+  present (`has_element?/2`) and not `disabled`. For `submit`, the form's submit
+  button is checked too.
+  - If the target is missing or disabled, the helper sends no event and returns
+    `{:rejected, {:not_available, selector}, ctx}`.
+  - If the selector matches more than one element, the helper raises
+    `Outlaw.Error`. That's a mapping bug, not a UI verdict.
+  - With `view == nil` (a page that isn't a LiveView), every helper returns
+    `:not_available`.
+- **Acting.** The event is sent with `render_click/render_submit/render_change`
+  via `element/2` and `form/3`. Then `render_async(view)` runs so that
+  `assign_async`/`start_async` results land before projection. This is the
+  whole of single-view settling.
+- **Redirects.** For `{:error, {:live_redirect | :redirect, %{to: to}}}`:
+  - It is followed with `follow_redirect/2`.
+  - A LiveView target replaces `view` in ctx.
+  - A target that isn't a LiveView sets `view: nil, html: body`.
+  - `push_patch` needs no handling.
+- **Result.** Each helper returns the runner contract, `{:ok, ctx}`. It never
+  inspects spec state.
+
+### 8.4 The availability rule: `:action_not_offered`
+
+A UI must not offer what the spec forbids. With today's runner that is already
+enforced: an available element that accepts the event returns `{:ok, ctx}`, and
+if the spec does not enable the action there, the run fails with
+`:action_not_enabled`.
+
+A UI must also **offer what the spec allows.** Rule 3 of §5 gains a case for
+rejections whose reason is `:not_available` or `{:not_available, _}`:
+
+- Let `B := closure(C)`.
+- If **every** state in `B` has a successor labelled `name`, fail with
+  `:action_not_offered`: "The spec allows this action here, but the UI did not
+  offer it (the element was missing or disabled)."
+
+The check runs before the projection comparison. Requiring *every* candidate,
+rather than any, keeps the rule sound when unobserved variables leave several
+candidates, some of which don't enable the action. Other rejection reasons keep
+the existing semantics. The rule is keyed on the reason, not on LiveView, so a
+non-LiveView mapping may opt in by returning `{:not_available, _}`.
+
+For `:action_not_offered`:
+
+- The diagnostic underlines the spec action's guards, which made it enabled.
+- Its `help:` line names the selector.
+- `--json` carries `"selector"` in the failure details.
+
+### 8.5 Observing
+
+**Markup convention.** Each observed variable is one element:
+
+```heex
+<span data-outlaw-var="step" data-outlaw-value={~s("payment")} hidden />
+```
+
+The value is TLC syntax, parsed by `Outlaw.Value`. To avoid hand-written TLC,
+the `outlaw_var/1` function component renders Elixir values in that syntax:
+`<.outlaw_var name="step" value={@step} />`.
+
+- Strings, integers and booleans render as TLC.
+- `Outlaw.Value` model values, sets and records render as TLC.
+- Lists render as sequences.
+
+**`project_dom/1`** renders the view (or uses `html`) and collects every
+`[data-outlaw-var]` via `Dom`:
+
+- A variable appearing twice with different values is `:invalid_projection`,
+  and the message names both values.
+- An unparseable value is `:invalid_projection`, quoting the raw text.
+- A missing variable is `:invalid_projection`, the existing check.
+
+**`project_assigns(ctx, keys)`** is the escape hatch. It reads socket assigns
+through LiveViewTest internals, is documented as unstable, and returns the
+given keys as strings.
+
+### 8.6 Errors
+
+- A LiveView process crashing during an action or render surfaces as the
+  existing `:exception`/`:crashed` failures, with the exit reason.
+- The mapping's `action/3` diagnostic location (§9.1) applies unchanged.
+
+### 8.7 Limits (Phase 2a)
+
+Phase 2a does not cover:
+
+- more than one view or actor;
+- PubSub and `handle_info` from other processes (Phase 2b);
+- an Ecto sandbox;
+- JS hooks and `JS.*` client commands, which are never exercised.
+
+Server-side LiveView behaviour only.
 
 ## 9. Error handling
 
@@ -551,8 +671,19 @@ The Outlaw repo ships a `flake.nix` dev shell providing Elixir/Erlang, a JDK, an
   - `Counter` — trivial.
   - `Bank` — with a hidden (unobserved) variable.
   - `Workflow` — two actors, external-effect action.
-  - Phase 2: a three-step wizard LiveView (bug: "Pay" enabled before address),
-    plus a two-user PubSub variant.
+  - Phase 2a: `Wizard`, a three-step wizard LiveView (address → payment →
+    confirm), mounted with `live_isolated` through a minimal test endpoint.
+    Variants:
+    - correct;
+    - buggy, "Pay" enabled before an address is entered, which must fail with
+      `:action_not_enabled`;
+    - buggy, "Pay" never rendered, which must fail with `:action_not_offered`;
+    - correct, `push_navigate`s to `/done` after Pay (exercises redirect
+      following).
+
+    `Wizard.tla` is human-authored, written with the agent as TLCRunner was,
+    and locked.
+  - Phase 2b: a two-user PubSub variant.
 - Tests needing Java are tagged `:tlc`; value/graph tests run anywhere.
 - CI order: fixture suite first, then Outlaw's own `mix outlaw.verify` (§12).
 
@@ -569,9 +700,20 @@ and Mermaid, flake, fixtures.
 - The cache + lock protocol (when a graph is reused vs rebuilt; when a spec
   change is flagged vs accepted).
 
-**Phase 2 — LiveView, spec-first.** Before Phase 2 code exists, the human specs
-the settle protocol (multi-view async updates, timeouts, redirect-replaces-view);
-Phase 2 is implemented against it with Outlaw.
+**Phase 2a — LiveView, single view.** (§8)
+
+1. The human writes `Wizard.tla` first.
+2. The helpers, `Dom` and `outlaw_var/1` are built test-first.
+3. The runner gains `:action_not_offered` (§8.4).
+4. The wizard fixtures join the circular-trust-guard suite.
+5. Measured catch rates for both buggy wizards (`--seed 1..10`) are recorded
+   in the README.
+6. A LiveView guide (`guides/liveview.md`) is added.
+
+**Phase 2b — LiveView, multi-view, spec-first.** Before Phase 2b code exists,
+the human specs the driver/settle protocol (multi-view async updates,
+timeouts, redirect-replaces-view). Phase 2b is implemented against it with
+Outlaw.
 
 **Circular trust guard.** Outlaw self-verification counts only while the fixture
 suite is green — known-buggy implementations must fail. CI enforces the order.
