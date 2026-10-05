@@ -6,7 +6,7 @@ defmodule Outlaw.Fixtures.Web.DoneLive do
 
   def render(assigns) do
     ~H"""
-    <div><span hidden data-outlaw-var="page" data-outlaw-json={JSON.encode!("done")}></span>Done</div>
+    <div><h1 id="page">Done</h1></div>
     """
   end
 end

@@ -12,7 +12,7 @@ defmodule Outlaw.Fixtures.Web.AsyncLive do
   def render(assigns) do
     ~H"""
     <div>
-      <span hidden data-outlaw-var="status" data-outlaw-json={JSON.encode!(@status)}></span>
+      <p id="status">{@status}</p>
     </div>
     """
   end

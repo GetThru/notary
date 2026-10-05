@@ -17,7 +17,7 @@ defmodule <%= @module %> do
   # Driving a LiveView? import Outlaw.Conformance.LiveView and use:
   #   def init, do: mount(MyAppWeb.SomeLive, endpoint: MyAppWeb.Endpoint)
   #   def action("Pay", _, ctx), do: click(ctx, "#pay")
-  #   def project(ctx), do: project_dom(ctx)
+  #   def project(ctx), do: %{"var" => text(ctx, "#some-id")}
   #   def teardown(ctx), do: unmount(ctx)
   # See the LiveView guide.
 

@@ -23,7 +23,12 @@ defmodule Outlaw.Fixtures.WizardSpec do
   def action("StartOver", _, ctx), do: click(ctx, "#start-over")
 
   @impl true
-  def project(ctx), do: project_dom(ctx)
+  def project(ctx) do
+    %{
+      "step" => ctx |> text("#step-title") |> String.downcase(),
+      "address" => has?(ctx, "#address-summary")
+    }
+  end
 
   @impl true
   def teardown(ctx), do: unmount(ctx)

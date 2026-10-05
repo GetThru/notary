@@ -10,7 +10,12 @@ if Code.ensure_loaded?(Phoenix.LiveViewTest) and Code.ensure_loaded?(LazyHTML) d
           def init, do: mount(MyAppWeb.WizardLive, endpoint: MyAppWeb.Endpoint)
           def actions, do: %{"Pay" => StreamData.constant(%{}), ...}
           def action("Pay", _, ctx), do: click(ctx, "#pay")
-          def project(ctx), do: project_dom(ctx)
+
+          def project(ctx) do
+            %{"step" => ctx |> text("#step-title") |> String.downcase(),
+              "address" => has?(ctx, "#address-summary")}
+          end
+
           def teardown(ctx), do: unmount(ctx)
         end
 
@@ -228,34 +233,125 @@ if Code.ensure_loaded?(Phoenix.LiveViewTest) and Code.ensure_loaded?(LazyHTML) d
     end
 
     @doc """
-    Projects the `data-outlaw-var` markup of the current view (or static
-    page). A bad marker throws `:invalid_projection` for the runner.
+    The trimmed text content of the element matching `selector`, with
+    internal whitespace runs (spaces, tabs, newlines) collapsed to one space.
+    Needs exactly one match; 0 or 2+ throws `:invalid_projection` for the
+    runner, naming the helper, selector, and match count.
     """
-    @spec project_dom(Ctx.t()) :: %{String.t() => Outlaw.Value.t()}
-    def project_dom(%Ctx{} = ctx) do
-      case Outlaw.Conformance.LiveView.Dom.decode(current_html(ctx)) do
-        {:ok, projection} -> projection
-        {:error, details} -> throw({:outlaw_fail, :invalid_projection, details})
+    @spec text(Ctx.t(), String.t()) :: String.t()
+    def text(%Ctx{} = ctx, selector) do
+      nodes = exactly_one!(ctx, selector, "text(ctx, #{inspect(selector)})")
+      nodes |> LazyHTML.text() |> normalize_text()
+    end
+
+    @doc """
+    The trimmed, whitespace-collapsed text content (same normalisation as
+    `text/2`) of every element matching `selector`, in document order. `[]`
+    when nothing matches.
+    """
+    @spec texts(Ctx.t(), String.t()) :: [String.t()]
+    def texts(%Ctx{} = ctx, selector) do
+      ctx |> query(selector) |> Enum.map(&(&1 |> LazyHTML.text() |> normalize_text()))
+    end
+
+    @doc "Whether any element matches `selector`."
+    @spec has?(Ctx.t(), String.t()) :: boolean()
+    def has?(%Ctx{} = ctx, selector), do: ctx |> query(selector) |> Enum.any?()
+
+    @doc "The number of elements matching `selector`."
+    @spec count(Ctx.t(), String.t()) :: non_neg_integer()
+    def count(%Ctx{} = ctx, selector), do: ctx |> query(selector) |> Enum.count()
+
+    @doc """
+    The value of attribute `name` on the element matching `selector`, or
+    `nil` if the attribute is absent. A boolean attribute present with no
+    value (e.g. `disabled`) gives `""`. Needs exactly one match; 0 or 2+
+    throws `:invalid_projection` for the runner.
+    """
+    @spec attr(Ctx.t(), String.t(), String.t()) :: String.t() | nil
+    def attr(%Ctx{} = ctx, selector, name) do
+      nodes = exactly_one!(ctx, selector, "attr(ctx, #{inspect(selector)}, #{inspect(name)})")
+      attribute_or(nodes, name, nil)
+    end
+
+    @doc """
+    The current value of the element matching `selector`: an `<input>`'s
+    `value` attribute (`""` if absent — this includes checkboxes and radios,
+    whose `value` attribute is returned regardless of whether they're
+    checked), a `<textarea>`'s raw text content (not whitespace-collapsed),
+    or a `<select>`'s `selected` option's `value` attribute, falling back to
+    the first option's when none is marked `selected` (`""` when there are no
+    options at all). Needs exactly one match; 0 or 2+ throws
+    `:invalid_projection` for the runner.
+    """
+    @spec value(Ctx.t(), String.t()) :: String.t()
+    def value(%Ctx{} = ctx, selector) do
+      nodes = exactly_one!(ctx, selector, "value(ctx, #{inspect(selector)})")
+
+      case LazyHTML.tag(nodes) do
+        ["textarea"] -> LazyHTML.text(nodes)
+        ["select"] -> select_value(nodes)
+        _ -> attribute_or(nodes, "value", "")
       end
     end
 
     @doc """
-    Escape hatch: reads `keys` from the LiveView's socket assigns, returned
-    with string keys. Depends on LiveView internals (the channel process's
-    state); prefer `project_dom/1`.
+    The current LiveView's socket assigns map. Depends on LiveView internals
+    (the channel process's state, read via `:sys.get_state/1`); prefer the
+    DOM helpers above, and reach for `assigns/1` only when a fact truly isn't
+    shown anywhere in the rendered page. Raises `Outlaw.Error` when the
+    current page isn't a LiveView.
     """
-    @spec project_assigns(Ctx.t(), [atom()]) :: %{String.t() => term()}
-    def project_assigns(%Ctx{view: view}, keys) when not is_nil(view) do
+    @spec assigns(Ctx.t()) :: map()
+    def assigns(%Ctx{view: view}) when not is_nil(view) do
       %{socket: %{assigns: assigns}} = :sys.get_state(view.pid)
-      Map.new(keys, &{Atom.to_string(&1), Map.fetch!(assigns, &1)})
+      assigns
     end
 
-    def project_assigns(%Ctx{view: nil}, _keys) do
+    def assigns(%Ctx{view: nil}) do
       raise Outlaw.Error.new(
               :invalid_mapping,
-              "project_assigns/2 needs a LiveView; the current page is not one"
+              "assigns/1 needs a LiveView; the current page is not one"
             )
     end
+
+    defp select_value(nodes) do
+      options = LazyHTML.query(nodes, "option")
+      selected = LazyHTML.query(nodes, "option[selected]")
+
+      cond do
+        Enum.any?(selected) -> selected |> Enum.at(0) |> attribute_or("value", "")
+        Enum.any?(options) -> options |> Enum.at(0) |> attribute_or("value", "")
+        true -> ""
+      end
+    end
+
+    defp attribute_or(nodes, name, default) do
+      case LazyHTML.attribute(nodes, name) do
+        [value] -> value
+        [] -> default
+      end
+    end
+
+    defp normalize_text(text), do: text |> String.trim() |> String.replace(~r/\s+/, " ")
+
+    defp exactly_one!(ctx, selector, call) do
+      nodes = query(ctx, selector)
+
+      case Enum.count(nodes) do
+        1 ->
+          nodes
+
+        n ->
+          throw(
+            {:outlaw_fail, :invalid_projection,
+             %{message: "#{call} matched #{n} elements; it needs exactly one"}}
+          )
+      end
+    end
+
+    defp query(%Ctx{} = ctx, selector),
+      do: ctx |> current_html() |> LazyHTML.from_fragment() |> LazyHTML.query(selector)
 
     defp current_html(%Ctx{view: nil, html: html}), do: html
     defp current_html(%Ctx{view: view}), do: Phoenix.LiveViewTest.render(view)
@@ -264,7 +360,7 @@ if Code.ensure_loaded?(Phoenix.LiveViewTest) and Code.ensure_loaded?(LazyHTML) d
       do: {:rejected, {:not_available, selector}, ctx}
 
     defp available(%Ctx{} = ctx, selector, kind) do
-      nodes = ctx |> current_html() |> LazyHTML.from_fragment() |> LazyHTML.query(selector)
+      nodes = query(ctx, selector)
 
       case Enum.count(nodes) do
         0 ->

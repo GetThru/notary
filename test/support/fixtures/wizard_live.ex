@@ -13,8 +13,8 @@ defmodule Outlaw.Fixtures.WizardLive do
   def render(assigns) do
     ~H"""
     <div>
-      <span hidden data-outlaw-var="step" data-outlaw-json={JSON.encode!(@step)}></span>
-      <span hidden data-outlaw-var="address" data-outlaw-json={JSON.encode!(@address)}></span>
+      <h2 id="step-title">{String.capitalize(@step)}</h2>
+      <p :if={@address} id="address-summary">Shipping to 1 Main St</p>
       <form :if={@step == "address"} id="address-form" phx-submit="enter_address">
         <input name="address" value="" />
         <button type="submit">Save address</button>
@@ -58,8 +58,8 @@ defmodule Outlaw.Fixtures.WizardDoneLive do
   def render(assigns) do
     ~H"""
     <div>
-      <span hidden data-outlaw-var="step" data-outlaw-json={JSON.encode!("done")}></span>
-      <span hidden data-outlaw-var="address" data-outlaw-json={JSON.encode!(true)}></span>
+      <h2 id="step-title">Done</h2>
+      <p id="address-summary">Shipping to 1 Main St</p>
       <button id="start-over" phx-click="start_over">Start over</button>
     </div>
     """

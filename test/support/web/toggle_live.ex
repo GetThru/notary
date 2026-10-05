@@ -9,9 +9,13 @@ defmodule Outlaw.Fixtures.Web.ToggleLive do
   def render(assigns) do
     ~H"""
     <div>
-      <span hidden data-outlaw-var="on" data-outlaw-json={JSON.encode!(@on)}></span>
-      <span hidden data-outlaw-var="name" data-outlaw-json={JSON.encode!(@name)}></span>
-      <span hidden data-outlaw-var="slow" data-outlaw-json={JSON.encode!(@slow)}></span>
+      <p id="on-state">{if @on, do: "On", else: "Off"}</p>
+      <p id="name">{@name}</p>
+      <p id="slow-state">{@slow}</p>
+      <p id="messy-text">
+        Hello
+        World
+      </p>
       <button id="flip" phx-click="flip">Flip</button>
       <button id="off" phx-click="off" disabled={not @on}>Off</button>
       <button :if={@on} id="only-when-on" phx-click="off">Off (conditional)</button>
@@ -20,6 +24,7 @@ defmodule Outlaw.Fixtures.Web.ToggleLive do
       <button id="lock" phx-click="lock">Lock</button>
       <form id="name-form" phx-submit="save" phx-change="typing">
         <input name="name" value={@name} />
+        <input id="unset" name="unset" />
         <button type="submit" disabled={@locked}>Save</button>
       </form>
       <form id="bare-form" phx-submit="save">
@@ -29,6 +34,23 @@ defmodule Outlaw.Fixtures.Web.ToggleLive do
       <button id="go" phx-click="go">Go</button>
       <button id="leave" phx-click="leave">Leave</button>
       <button id="go-async" phx-click="go-async">Go async</button>
+      <textarea id="bio">  padded  text  </textarea>
+      <select id="color">
+        <option value="red">Red</option>
+        <option value="green" selected>Green</option>
+        <option value="blue">Blue</option>
+      </select>
+      <select id="unselected">
+        <option value="a">A</option>
+        <option value="b">B</option>
+      </select>
+      <select id="empty-select"></select>
+      <ul id="items">
+        <li>One</li>
+        <li>Two</li>
+        <li>Three</li>
+      </ul>
+      <ul id="empty-list"></ul>
     </div>
     """
   end
