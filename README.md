@@ -187,7 +187,12 @@ defmodule MyAppWeb.Specs.Wizard do
 
   def init, do: mount(MyAppWeb.WizardLive, endpoint: MyAppWeb.Endpoint)
   def action("Pay", _, ctx), do: click(ctx, "#pay")
-  def project(ctx), do: project_dom(ctx)
+
+  def project(ctx) do
+    %{"step" => ctx |> text("#step-title") |> String.downcase(),
+      "address" => has?(ctx, "#address-summary")}
+  end
+
   def teardown(ctx), do: unmount(ctx)
 end
 ```
@@ -195,10 +200,11 @@ end
 Two rules are enforced: the UI must not offer what the spec forbids
 (`action_not_enabled`, same as any mapping), and it must also *offer* what
 the spec allows (`action_not_offered` — a missing or disabled element where
-the spec says the action should be possible). Variables are read from the
-rendered HTML via a `data-outlaw-var`/`data-outlaw-json` (or
-`data-outlaw-value`) markup convention in your own templates — no Outlaw code
-in app templates, since Outlaw is a `:dev`/`:test` dependency. See the
+the spec says the action should be possible). Variables are read straight
+from the rendered page with page-query helpers (`text/2`, `has?/2`,
+`attr/3`, `value/2`, ...) — no Outlaw code or test-only markup in app
+templates, since Outlaw is a `:dev`/`:test` dependency. `assigns/1` is an
+escape hatch for state the page never shows. See the
 [LiveView guide](guides/liveview.md) for the full walkthrough.
 
 Measured on a three-step checkout wizard (seeds 1..10, default 100 runs,

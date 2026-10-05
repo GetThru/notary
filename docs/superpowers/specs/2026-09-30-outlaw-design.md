@@ -461,7 +461,10 @@ defmodule MyAppWeb.Specs.Wizard do
   def action("Next", _, ctx), do: click(ctx, "#next")
   def action("Pay", _, ctx), do: click(ctx, "#pay")
 
-  def project(ctx), do: project_dom(ctx)
+  def project(ctx) do
+    %{"step" => ctx |> text("#step-title") |> String.downcase(),
+      "address" => has?(ctx, "#address-summary")}
+  end
 end
 ```
 
@@ -479,9 +482,8 @@ are unchanged, except for the availability rule in §8.4.
 
 | Module | Responsibility |
 |---|---|
-| `Outlaw.Conformance.LiveView` | Helpers: `mount/2`, `click/2`, `submit/3`, `change/3`, `project_dom/1`, `project_assigns/2`. |
+| `Outlaw.Conformance.LiveView` | Helpers: `mount/2`, `click/2`, `submit/3`, `change/3`, `text/2`, `texts/2`, `has?/2`, `count/2`, `attr/3`, `value/2`, `assigns/1`. |
 | `Outlaw.Conformance.LiveView.Ctx` | `%Ctx{conn, view, html, endpoint, assigns}`. `view` is the current `Phoenix.LiveViewTest.View`, or `nil` after a redirect to a page that isn't a LiveView, where `html` holds that page. `assigns` is free space for the mapping, e.g. a stub's pid. |
-| `Outlaw.Conformance.LiveView.Dom` | Pure function: rendered HTML → `%{var => value}`. Unit-tested without any LiveView process. |
 
 ### 8.3 Driving
 
@@ -542,39 +544,44 @@ For `:action_not_offered`:
 
 ### 8.5 Observing
 
-**Markup convention.** The markers live in the application's own templates,
-which compile in every environment. Outlaw is a `:dev`/`:test` dependency, so
-the markup uses no Outlaw code: plain attributes, decoded by Outlaw. Each
-observed variable is one element with `data-outlaw-var` and exactly one value
-attribute:
+**Decision: no test-only markup in templates.** An earlier design read a set
+of hidden `<span>` elements, carrying attributes that named a spec variable
+and encoded its value, out of the rendered HTML — markup that existed only
+for Outlaw to read. The human rejected it: application templates shouldn't
+carry markup whose only reader is a test dependency. Instead, `project/1`
+queries the page the same way a user's browser presents it, through a small
+set of page-query helpers on `Outlaw.Conformance.LiveView`, all built on
+LazyHTML (already a dependency, also used by `click/3`'s availability check):
 
-```heex
-<span hidden data-outlaw-var="step"  data-outlaw-json={JSON.encode!(@step)} />
-<span hidden data-outlaw-var="users" data-outlaw-value={"{u1, u2}"} />
-```
+| Helper | Returns | Selector rule |
+|---|---|---|
+| `text(ctx, sel)` | trimmed text, internal whitespace runs collapsed to one space | exactly 1 match |
+| `texts(ctx, sel)` | list of texts (same normalisation), document order | 0+ |
+| `has?(ctx, sel)` | boolean (any match) | — |
+| `count(ctx, sel)` | number of matches | — |
+| `attr(ctx, sel, name)` | attribute value, or `nil` if absent (a boolean attribute like `disabled` gives `""`) | exactly 1 |
+| `value(ctx, sel)` | `<input>`'s `value` attribute (`""` if absent), `<textarea>`'s raw text content (not whitespace-collapsed), or `<select>`'s selected option's value (first option's, or `""`, if none is selected) | exactly 1 |
+| `assigns(ctx)` | the LiveView socket assigns map | — |
 
-- **`data-outlaw-json`** is decoded with Elixir's built-in `JSON`, with no
-  extra dependency.
-  - Strings, integers and booleans map directly.
-  - Arrays are sequences.
-  - Objects are records with string keys.
-  - An empty object is the empty sequence/function `<<>>`.
-  - `null` and floats are `:invalid_projection`.
-- **`data-outlaw-value`** is TLC syntax, parsed by `Outlaw.Value`. It is used
-  for sets and model values, which JSON cannot express.
-- An element with both value attributes, or neither, is `:invalid_projection`.
+All of them read the current view's rendered HTML (`Phoenix.LiveViewTest.render(view)`)
+or `ctx.html` when `view == nil` (a static page after a redirect) — the same
+`current_html/1` helper `click/3` and friends already use.
 
-**`project_dom/1`** renders the view (or uses `html`) and collects every
-`[data-outlaw-var]` via `Dom`:
-
-- A variable appearing twice with different values is `:invalid_projection`,
-  and the message names both values.
-- An unparseable value is `:invalid_projection`, quoting the raw text.
-- A missing variable is `:invalid_projection`, the existing check.
-
-**`project_assigns(ctx, keys)`** is the escape hatch. It reads socket assigns
-through LiveViewTest internals, is documented as unstable, and returns the
-given keys as strings.
+- **The exactly-one rule.** `text/2`, `attr/3`, and `value/2` need exactly one
+  match. 0 or 2+ throws `{:outlaw_fail, :invalid_projection, %{message: msg}}`
+  for the runner, where `msg` names the helper, the selector, and the match
+  count, e.g. `text(ctx, "#step-title") matched 0 elements; it needs exactly
+  one`. This is the same diagnostic path the old markup convention's decode
+  errors used (`details.message` renders as the diagnostic's `help:` line,
+  pointing at `project/1`); a `variable:` detail key is included only when
+  it's meaningful (the markup convention's duplicate-with-different-values
+  case doesn't apply here, since a projection map literal only ever writes
+  each key once).
+- **`assigns(ctx)`** is the escape hatch for a fact the page never shows. It
+  reads socket assigns through LiveViewTest internals
+  (`:sys.get_state(view.pid)` → `%{socket: %{assigns: a}}`), is documented as
+  unstable for exactly that reason, and raises `Outlaw.Error` `:invalid_mapping`
+  when `view` is `nil` (the current page isn't a LiveView).
 
 ### 8.6 Errors
 

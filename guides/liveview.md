@@ -51,7 +51,7 @@ Otherwise `Outlaw.Conformance.LiveView` is never defined, and a mapping that
 imports it fails with "module Outlaw.Conformance.LiveView is not loaded".
 
 Nothing in your application's own templates needs to depend on Outlaw: see
-"Markup" below.
+"Observing the page" below — Outlaw reads your normal, visible markup.
 
 ## 3. The spec
 
@@ -117,34 +117,53 @@ What each action means for the UI:
 - **`StartOver`** — only from `done`; resets both variables so the wizard can
   run again.
 
-## 4. Markup
+## 4. Observing the page
 
-Outlaw observes the LiveView's state the same way for any variable: a
-`data-outlaw-var` element in the rendered HTML, with exactly one value
-attribute. In `MyAppWeb.WizardLive`'s template:
+Outlaw reads the LiveView's rendered HTML directly — the same markup a
+browser would see — instead of asking the template to expose a parallel,
+test-only data format. `Outlaw.Conformance.LiveView` gives `project/1` a
+small set of page-query helpers:
 
-```heex
-<span hidden data-outlaw-var="step" data-outlaw-json={JSON.encode!(@step)} />
-<span hidden data-outlaw-var="address" data-outlaw-json={JSON.encode!(@address)} />
+| Helper | Returns | Selector rule |
+|---|---|---|
+| `text(ctx, sel)` | trimmed text, internal whitespace runs collapsed to one space | exactly 1 match |
+| `texts(ctx, sel)` | list of texts (same normalisation), document order | 0+ |
+| `has?(ctx, sel)` | boolean (any match) | — |
+| `count(ctx, sel)` | number of matches | — |
+| `attr(ctx, sel, name)` | attribute value, or `nil` if absent (a boolean attribute like `disabled` gives `""`) | exactly 1 |
+| `value(ctx, sel)` | current value of an `<input>` (its `value` attribute), a `<textarea>` (raw text, not whitespace-collapsed), or a `<select>` (the selected option's value, or the first option's if none is selected) | exactly 1 |
+| `assigns(ctx)` | the LiveView's socket assigns map (escape hatch, below) | — |
+
+For the wizard, `step` and `address` are read straight from the elements a
+user actually sees — the `<h2 id="step-title">` and the conditional
+`<p id="address-summary">` in `MyAppWeb.WizardLive`'s template (section 5):
+
+```elixir
+def project(ctx) do
+  %{"step" => ctx |> text("#step-title") |> String.downcase(),
+    "address" => has?(ctx, "#address-summary")}
+end
 ```
 
-- `data-outlaw-json` is decoded with Elixir's built-in `JSON`. Strings,
-  integers, booleans, arrays and objects with string keys all work directly;
-  `null` and floats don't map onto TLA+ values. An empty object `{}` is the
-  empty sequence/function `<<>>` (TLC prints both the same way), so an empty
-  map compares equal to the spec's `<<>>`. (`data-outlaw-value`, TLC
-  syntax parsed by `Outlaw.Value`, exists for sets and model values that JSON
-  can't express — not needed here.)
-- There's no Outlaw helper or import in the template. Outlaw is a
-  `:dev`/`:test` dependency; these are plain HTML attributes that happen to
-  compile in every environment, and only Outlaw's test-time code ever reads
-  them.
-- `hidden` keeps the markers invisible — they carry data, not anything a user
-  should see or click.
+- **Reading the page checks the UI itself.** There's no parallel channel
+  (a hidden marker) that could drift from what's actually rendered — go stale,
+  or never get wired to the real state — because `project/1` sees exactly what
+  the browser would. A missing or wrong `id`/selector fails the same way a
+  missing button does: visibly, in the page.
+- **An exactly-one helper that matches 0 or more than 1 element throws
+  `:invalid_projection`** for the runner, same diagnostic path as any other
+  projection bug: the message names the helper, selector, and match count,
+  e.g. `text(ctx, "#step-title") matched 0 elements; it needs exactly one`.
+- **`assigns(ctx)` is the escape hatch** for a fact the page never renders
+  anywhere. It reads the LiveView's socket assigns directly, through
+  LiveViewTest internals (see "Limits" below), so it depends on things that
+  aren't part of any public contract. Reach for it only when there's truly
+  nothing in the DOM to query.
 
 ## 5. The mapping
 
-`MyAppWeb.WizardLive`, with the markers above and one element per action:
+`MyAppWeb.WizardLive`, with a step title and a conditional summary (the
+elements `project/1` reads above) and one element per action:
 
 ```elixir
 defmodule MyAppWeb.WizardLive do
@@ -157,8 +176,8 @@ defmodule MyAppWeb.WizardLive do
   def render(assigns) do
     ~H"""
     <div>
-      <span hidden data-outlaw-var="step" data-outlaw-json={JSON.encode!(@step)} />
-      <span hidden data-outlaw-var="address" data-outlaw-json={JSON.encode!(@address)} />
+      <h2 id="step-title">{String.capitalize(@step)}</h2>
+      <p :if={@address} id="address-summary">Shipping to 1 Main St</p>
 
       <form :if={@step == "address"} id="address-form" phx-submit="enter_address">
         <input name="address" value="" />
@@ -208,7 +227,10 @@ defmodule MyAppWeb.Specs.Wizard do
   def action("StartOver", _, ctx), do: click(ctx, "#start-over")
 
   @impl true
-  def project(ctx), do: project_dom(ctx)
+  def project(ctx) do
+    %{"step" => ctx |> text("#step-title") |> String.downcase(),
+      "address" => has?(ctx, "#address-summary")}
+  end
 
   @impl true
   def teardown(ctx), do: unmount(ctx)
@@ -231,10 +253,9 @@ A few things worth calling out:
   is missing or disabled, nothing is sent and the helper returns
   `{:rejected, {:not_available, selector}, ctx}` — the reason the runner
   recognizes for the `action_not_offered` rule in §1.
-- **`project_dom(ctx)` renders the current view** (or uses the stored HTML,
-  after a redirect to a non-LiveView page) and collects every
-  `data-outlaw-var` element into the projection, via
-  `Outlaw.Conformance.LiveView.Dom`.
+- **`text/2` and `has?/2` (like every helper here) render the current view**
+  (or use the stored HTML, after a redirect to a non-LiveView page) and query
+  it with the given CSS selector — see "Observing the page" above.
 - **`teardown(ctx), do: unmount(ctx)` matters.** `mount/2` can be called
   outside an ExUnit test process (conformance runs happen in their own
   process, and `mix outlaw.verify` doesn't start ExUnit at all), so it
@@ -278,8 +299,8 @@ Outlaw: all checks passed.
 ```
 
 All five actions, all four states, all six transitions in the graph — driven
-through the real LiveView via `click`/`submit`, projected back through the
-`data-outlaw-var` markers.
+through the real LiveView via `click`/`submit`, projected back by reading the
+rendered page with `text/2` and `has?/2`.
 
 ## 7. Break it
 
@@ -401,11 +422,10 @@ missing element. Measured the same way, this bug is caught on 10/10 seeds.
 - **No JS hooks.** `phx-hook` client-side behavior and `JS.*` commands are
   never exercised; `click`/`submit`/`change` only ever send the server
   events LiveView itself would send for a real click/submit/change.
-- **`project_assigns/2` depends on LiveView internals** (it reads the
-  channel process's socket assigns via `:sys.get_state/1`), and is
-  documented as unstable for exactly that reason. Prefer `project_dom/1`
-  (the markup convention above); reach for `project_assigns/2` only when a
-  variable truly can't be rendered.
+- **`assigns/1` depends on LiveView internals** (it reads the channel
+  process's socket assigns via `:sys.get_state/1`), and is documented as
+  unstable for exactly that reason. Prefer the DOM helpers in "Observing the
+  page" above; reach for `assigns/1` only when a fact truly can't be rendered.
 - **The helpers rely on internals of LiveViewTest and ExUnit.** They call
   undocumented `Phoenix.LiveViewTest` functions (`__live__/3`,
   `__isolated__/4`, `__follow_redirect__/4`) to mount and follow redirects
