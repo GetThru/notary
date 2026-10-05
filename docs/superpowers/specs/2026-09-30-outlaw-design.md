@@ -551,7 +551,7 @@ for Outlaw to read. The human rejected it: application templates shouldn't
 carry markup whose only reader is a test dependency. Instead, `project/1`
 queries the page the same way a user's browser presents it, through a small
 set of page-query helpers on `Outlaw.Conformance.LiveView`, all built on
-LazyHTML (already a dependency, also used by `click/3`'s availability check):
+LazyHTML (already a dependency, also used by `click/2`'s availability check):
 
 | Helper | Returns | Selector rule |
 |---|---|---|
@@ -565,7 +565,7 @@ LazyHTML (already a dependency, also used by `click/3`'s availability check):
 
 All of them read the current view's rendered HTML (`Phoenix.LiveViewTest.render(view)`)
 or `ctx.html` when `view == nil` (a static page after a redirect) — the same
-`current_html/1` helper `click/3` and friends already use.
+`current_html/1` helper `click/2` and friends already use.
 
 - **The exactly-one rule.** `text/2`, `attr/3`, and `value/2` need exactly one
   match. 0 or 2+ throws `{:outlaw_fail, :invalid_projection, %{message: msg}}`

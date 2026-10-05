@@ -126,13 +126,20 @@ small set of page-query helpers:
 
 | Helper | Returns | Selector rule |
 |---|---|---|
-| `text(ctx, sel)` | trimmed text, internal whitespace runs collapsed to one space | exactly 1 match |
+| `text(ctx, sel)` | trimmed text, internal whitespace runs (including non-breaking spaces) collapsed to one space | exactly 1 match |
 | `texts(ctx, sel)` | list of texts (same normalisation), document order | 0+ |
 | `has?(ctx, sel)` | boolean (any match) | — |
 | `count(ctx, sel)` | number of matches | — |
 | `attr(ctx, sel, name)` | attribute value, or `nil` if absent (a boolean attribute like `disabled` gives `""`) | exactly 1 |
-| `value(ctx, sel)` | current value of an `<input>` (its `value` attribute), a `<textarea>` (raw text, not whitespace-collapsed), or a `<select>` (the selected option's value, or the first option's if none is selected) | exactly 1 |
+| `value(ctx, sel)` | current value of an `<input>` (its `value` attribute), a `<textarea>` (raw text, not whitespace-collapsed), or a `<select>` (the selected option's value, falling back to its text if it has none, or the first option's if none is selected) | exactly 1 |
 | `assigns(ctx)` | the LiveView's socket assigns map (escape hatch, below) | — |
+
+`text/2` and `texts/2` read text the way a page visibly shows it, not raw
+markup: `<script>` and `<style>` content is excluded (it's code, not
+content), while a `hidden` element's text is still included (`hidden` doesn't
+remove it from the DOM, just from what a user sees). Adjacent elements and
+`<br>` add no separator between their text — the same "all the text, run
+together" behavior as the DOM's `textContent`.
 
 For the wizard, `step` and `address` are read straight from the elements a
 user actually sees — the `<h2 id="step-title">` and the conditional
