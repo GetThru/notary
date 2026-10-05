@@ -234,24 +234,29 @@ if Code.ensure_loaded?(Phoenix.LiveViewTest) and Code.ensure_loaded?(LazyHTML) d
 
     @doc """
     The trimmed text content of the element matching `selector`, with
-    internal whitespace runs (spaces, tabs, newlines) collapsed to one space.
-    Needs exactly one match; 0 or 2+ throws `:invalid_projection` for the
-    runner, naming the helper, selector, and match count.
+    internal whitespace runs (spaces, tabs, newlines, non-breaking spaces)
+    collapsed to one space. `<script>` and `<style>` content is excluded (the
+    text is what the page shows, not code); an element that is `hidden` is
+    still included, since it's in the DOM. Adjacent elements and `<br>` add no
+    separator between their text — the same behavior as the DOM's
+    `textContent`. Needs exactly one match; 0 or 2+ throws
+    `:invalid_projection` for the runner, naming the helper, selector, and
+    match count.
     """
     @spec text(Ctx.t(), String.t()) :: String.t()
     def text(%Ctx{} = ctx, selector) do
       nodes = exactly_one!(ctx, selector, "text(ctx, #{inspect(selector)})")
-      nodes |> LazyHTML.text() |> normalize_text()
+      nodes |> visible_text() |> normalize_text()
     end
 
     @doc """
-    The trimmed, whitespace-collapsed text content (same normalisation as
-    `text/2`) of every element matching `selector`, in document order. `[]`
-    when nothing matches.
+    The trimmed, whitespace-collapsed text content (same normalisation and
+    `<script>`/`<style>` exclusion as `text/2`) of every element matching
+    `selector`, in document order. `[]` when nothing matches.
     """
     @spec texts(Ctx.t(), String.t()) :: [String.t()]
     def texts(%Ctx{} = ctx, selector) do
-      ctx |> query(selector) |> Enum.map(&(&1 |> LazyHTML.text() |> normalize_text()))
+      ctx |> query(selector) |> Enum.map(&(&1 |> visible_text() |> normalize_text()))
     end
 
     @doc "Whether any element matches `selector`."
@@ -281,8 +286,10 @@ if Code.ensure_loaded?(Phoenix.LiveViewTest) and Code.ensure_loaded?(LazyHTML) d
     checked), a `<textarea>`'s raw text content (not whitespace-collapsed),
     or a `<select>`'s `selected` option's `value` attribute, falling back to
     the first option's when none is marked `selected` (`""` when there are no
-    options at all). Needs exactly one match; 0 or 2+ throws
-    `:invalid_projection` for the runner.
+    options at all). When the chosen option has no `value` attribute, its
+    text content is used instead (trimmed and whitespace-collapsed, like
+    `text/2`) — the same fallback a browser uses. Needs exactly one match;
+    0 or 2+ throws `:invalid_projection` for the runner.
     """
     @spec value(Ctx.t(), String.t()) :: String.t()
     def value(%Ctx{} = ctx, selector) do
@@ -320,9 +327,18 @@ if Code.ensure_loaded?(Phoenix.LiveViewTest) and Code.ensure_loaded?(LazyHTML) d
       selected = LazyHTML.query(nodes, "option[selected]")
 
       cond do
-        Enum.any?(selected) -> selected |> Enum.at(0) |> attribute_or("value", "")
-        Enum.any?(options) -> options |> Enum.at(0) |> attribute_or("value", "")
+        Enum.any?(selected) -> selected |> Enum.at(0) |> option_value()
+        Enum.any?(options) -> options |> Enum.at(0) |> option_value()
         true -> ""
+      end
+    end
+
+    # A browser falls back to an <option>'s text when it has no `value`
+    # attribute at all (an empty `value=""` is still used as-is).
+    defp option_value(option) do
+      case attribute_or(option, "value", nil) do
+        nil -> option |> visible_text() |> normalize_text()
+        value -> value
       end
     end
 
@@ -333,7 +349,20 @@ if Code.ensure_loaded?(Phoenix.LiveViewTest) and Code.ensure_loaded?(LazyHTML) d
       end
     end
 
-    defp normalize_text(text), do: text |> String.trim() |> String.replace(~r/\s+/, " ")
+    # Like `LazyHTML.text/1`, but excludes text inside `<script>`/`<style>`
+    # descendants (never rendered to a user, so it shouldn't be treated as
+    # page content). Elements that are `hidden` are still included, same as
+    # `LazyHTML.text/1` -- `hidden` doesn't remove a node from the DOM.
+    defp visible_text(nodes), do: nodes |> LazyHTML.to_tree() |> Enum.map_join("", &node_text/1)
+
+    defp node_text(text) when is_binary(text), do: text
+    defp node_text({:comment, _}), do: ""
+    defp node_text({tag, _attrs, _children}) when tag in ["script", "style"], do: ""
+    defp node_text({_tag, _attrs, children}), do: Enum.map_join(children, "", &node_text/1)
+
+    # `\s` under the `/u` modifier is Unicode-aware whitespace, which includes
+    # the non-breaking space (U+00A0) a template might render as `&nbsp;`.
+    defp normalize_text(text), do: text |> String.trim() |> String.replace(~r/\s+/u, " ")
 
     defp exactly_one!(ctx, selector, call) do
       nodes = query(ctx, selector)

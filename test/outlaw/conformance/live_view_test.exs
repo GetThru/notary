@@ -208,6 +208,15 @@ defmodule Outlaw.Conformance.LiveViewTest do
       assert {:outlaw_fail, :invalid_projection, details} = catch_throw(text(toggle(), "#nope"))
       refute Map.has_key?(details, :variable)
     end
+
+    test "excludes <script> and <style> content, but still includes hidden elements" do
+      assert text(toggle(), "#with-script") == "Hello"
+      assert text(toggle(), "#hidden-para") == "Hidden but present"
+    end
+
+    test "collapses non-breaking spaces like ordinary whitespace" do
+      assert text(toggle(), "#nbsp-text") == "Hello World"
+    end
   end
 
   describe "texts/2" do
@@ -287,6 +296,14 @@ defmodule Outlaw.Conformance.LiveViewTest do
 
     test "a <select> with no options gives an empty string" do
       assert value(toggle(), "#empty-select") == ""
+    end
+
+    test "a <select>'s selected option falls back to its text when it has no value attribute" do
+      assert value(toggle(), "#option-text-selected") == "Beta"
+    end
+
+    test "a <select> with no selected option falls back to the first option's text when it has no value attribute" do
+      assert value(toggle(), "#option-text-unselected") == "Alpha"
     end
 
     test "0 or 2+ matches throws :invalid_projection naming the helper, selector, and count" do

@@ -45,6 +45,21 @@ defmodule Outlaw.Fixtures.Web.ToggleLive do
         <option value="b">B</option>
       </select>
       <select id="empty-select"></select>
+      <select id="option-text-selected">
+        <option>Alpha</option>
+        <option selected>Beta</option>
+      </select>
+      <select id="option-text-unselected">
+        <option>Alpha</option>
+        <option>Beta</option>
+      </select>
+      <div id="with-script">
+        Hello
+        <script>var x = 1;</script>
+        <style>.a { color: red; }</style>
+      </div>
+      <p id="hidden-para" hidden>Hidden but present</p>
+      <p id="nbsp-text">{"Hello World"}</p>
       <ul id="items">
         <li>One</li>
         <li>Two</li>
