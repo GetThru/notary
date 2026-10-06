@@ -91,6 +91,37 @@ defmodule Outlaw.ViewerTest do
     assert Viewer.failure_model("Counter", graph, failure).highlight == [init]
   end
 
+  test "failure_model warns when highlights no longer resolve (stale failure term)" do
+    # State ids are TLC fingerprints; a failure recorded against an earlier
+    # graph rebuild carries ids that no longer exist in the current one.
+    model =
+      Viewer.failure_model("Counter", Fixtures.graph("Counter"), %Failure{
+        kind: :illegal_transition,
+        seed: 1,
+        steps: [
+          %Step{index: 0, outcome: :ok, projection: %{"x" => 0}, candidates: ["dead-id"]},
+          %Step{index: 1, outcome: :ok, projection: %{"x" => 1}, candidates: ["also-dead"]}
+        ]
+      })
+
+    assert model.note =~ "WARNING: the recorded failure predates the current state graph"
+    assert model.note =~ "2 of 2 highlights no longer resolve"
+    assert model.highlight == ["dead-id", "also-dead"]
+
+    # Fresh ids: no warning.
+    graph = Fixtures.graph("Counter")
+    [init | _] = graph.initial
+
+    fresh =
+      Viewer.failure_model("Counter", graph, %Failure{
+        kind: :illegal_transition,
+        seed: 1,
+        steps: [%Step{index: 0, outcome: :ok, projection: %{"x" => 0}, candidates: [init]}]
+      })
+
+    refute fresh.note =~ "WARNING"
+  end
+
   test "read_failure returns :error for corrupt bytes or a term that isn't a Failure" do
     corrupt_path = Path.join(Outlaw.Config.work_dir(), "Corrupt-failure.term")
     File.mkdir_p!(Outlaw.Config.work_dir())

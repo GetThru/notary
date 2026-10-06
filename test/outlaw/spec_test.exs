@@ -24,6 +24,10 @@ defmodule Outlaw.SpecTest do
     assert {:ok, [_, _]} = Spec.select([], dir)
     assert {:ok, [%Spec{name: "B"}]} = Spec.select(["B"], dir)
     assert {:error, %Outlaw.Error{kind: :unknown_spec}} = Spec.select(["B", "Nope"], dir)
+
+    # Dupes dedupe: naming a spec twice runs it once.
+    assert {:ok, [%Spec{name: "B"}]} = Spec.select(["B", "B"], dir)
+    assert {:ok, [_, _]} = Spec.select(["A", "B", "A"], dir)
   end
 
   test "from_path derives the cfg", %{tmp_dir: dir} do
@@ -122,8 +126,10 @@ defmodule Outlaw.SpecTest do
     assert Spec.strip_comments(text) == text
   end
 
-  test "content hash changes with the spec, its cfg, or a sibling module", %{tmp_dir: dir} do
-    write(dir, [{"A.tla", "a"}, {"A.cfg", "c"}, {"Helper.tla", "h"}])
+  test "content hash changes with the spec, its cfg, or an EXTENDS-referenced module", %{
+    tmp_dir: dir
+  } do
+    write(dir, [{"A.tla", "EXTENDS Helper\na"}, {"A.cfg", "c"}, {"Helper.tla", "h"}])
     {:ok, spec} = Spec.fetch("A", dir)
     {:ok, h1} = Spec.content_hash(spec)
     assert h1 == elem(Spec.content_hash(spec), 1)
@@ -133,6 +139,17 @@ defmodule Outlaw.SpecTest do
       File.write!(Path.join(dir, file), body)
       refute elem(Spec.content_hash(spec), 1) == before
     end
+  end
+
+  test "content hash ignores an unreferenced sibling module", %{tmp_dir: dir} do
+    write(dir, [{"A.tla", "a"}, {"A.cfg", "c"}])
+    {:ok, spec} = Spec.fetch("A", dir)
+    {:ok, before} = Spec.content_hash(spec)
+
+    # A scratch module dropped into specs/ (never referenced) must not
+    # invalidate the cache key.
+    File.write!(Path.join(dir, "Scratch.tla"), "scratch")
+    assert elem(Spec.content_hash(spec), 1) == before
   end
 
   test "content_hash and fair_actions report a missing spec file as an actionable error", %{

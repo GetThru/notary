@@ -44,7 +44,11 @@ defmodule Outlaw.Spec do
   def select([], dir), do: {:ok, discover(dir)}
 
   def select(names, dir) do
-    Enum.reduce_while(names, {:ok, []}, fn name, {:ok, acc} ->
+    # Deduped: `mix outlaw.test Counter Counter` is a user slip, not a request
+    # to model-check the spec twice and print duplicate report rows.
+    names
+    |> Enum.uniq()
+    |> Enum.reduce_while({:ok, []}, fn name, {:ok, acc} ->
       case fetch(name, dir) do
         {:ok, spec} -> {:cont, {:ok, acc ++ [spec]}}
         error -> {:halt, error}
@@ -60,7 +64,13 @@ defmodule Outlaw.Spec do
 
   @spec content_hash(t()) :: {:ok, String.t()} | {:error, Error.t()}
   def content_hash(%__MODULE__{} = spec) do
-    files = Enum.sort(Path.wildcard(Path.join(spec.dir, "*.tla"))) ++ [spec.cfg_path]
+    # Only the spec's own module files plus `.cfg` -- not every `*.tla` in the
+    # dir. A scratch module dropped into `specs/` (never referenced by the
+    # spec) must not silently invalidate the cache key (and so force a full
+    # TLC re-run). SANY only resolves modules the root module extends, and
+    # those appears as `EXTENDS`/`INSTANCE` names -- hash the root module
+    # `Name.tla` plus any sibling `X.tla` the root's text mentions.
+    files = spec_files(spec)
 
     with :ok <- ensure_readable(files, spec) do
       hash =
@@ -73,10 +83,65 @@ defmodule Outlaw.Spec do
     end
   end
 
+  # The spec's module file, its `.cfg`, and every sibling `.tla` the modules'
+  # own text names via EXTENDS/INSTANCE (transitively; cycles are impossible
+  # in a SANY-parseable spec). Standard modules (`EXTENDS Naturals`, ...) and
+  # any referenced-but-missing module resolve from the jar / fail SANY's
+  # parse elsewhere, so only files that actually exist are hashed. A scratch
+  # module in `specs/` that nothing references is hashed by nothing.
+  @spec_files_depth 10
+
+  defp spec_files(%__MODULE__{dir: dir, tla_path: tla_path, cfg_path: cfg_path}) do
+    root = Path.basename(tla_path)
+    referenced = referenced_modules(tla_path, dir, MapSet.new([root]), @spec_files_depth)
+
+    existing =
+      referenced
+      |> Enum.sort()
+      |> Enum.map(&Path.join(dir, &1))
+      |> Enum.filter(&File.exists?/1)
+
+    [tla_path, cfg_path] ++ existing
+  end
+
+  defp referenced_modules(tla_path, dir, seen, depth) when depth > 0 do
+    case File.read(tla_path) do
+      {:ok, text} ->
+        names =
+          Regex.scan(~r/\b(?:EXTENDS|INSTANCE)\s+([A-Za-z_][A-Za-z0-9_]*)/, text)
+          |> Enum.map(fn [_, name] -> name <> ".tla" end)
+          |> MapSet.new()
+
+        Enum.reduce(Enum.to_list(names), seen, fn name, acc ->
+          sibling = Path.join(dir, name)
+
+          if MapSet.member?(acc, name) do
+            acc
+          else
+            acc = MapSet.put(acc, name)
+
+            if File.exists?(sibling) do
+              referenced_modules(sibling, dir, acc, depth - 1)
+            else
+              acc
+            end
+          end
+        end)
+
+      # Unreadable root: `ensure_readable/2` below reports the error; here we
+      # just fall back to the root file alone (the hash is moot on that path).
+      {:error, _} ->
+        seen
+    end
+  end
+
+  defp referenced_modules(_tla_path, _dir, seen, _depth), do: seen
+
   # `File.read!/1` here would surface a typo'd `spec:` path (e.g. `use
   # Outlaw.Conformance, spec: "spec/Bank.tla"`) as a raw File.Error from
-  # deep inside cache-key code; the files were wildcarded just above, so a
-  # missing one is a race -- both deserve the spec-not-found error.
+  # deep inside cache-key code. Only the root `.tla` and `.cfg` are required
+  # (referenced siblings were filtered to existing ones above; a genuinely
+  # missing one fails SANY's parse with its own `:spec_error`).
   defp ensure_readable(files, spec) do
     missing = Enum.reject(files, &File.exists?/1)
 

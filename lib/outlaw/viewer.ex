@@ -96,9 +96,26 @@ defmodule Outlaw.Viewer do
 
     from_graph(graph,
       title: "#{spec_name}: conformance failure (#{failure.kind})",
-      note: note,
+      note: note <> stale_note(graph, highlight),
       highlight: highlight
     )
+  end
+
+  # State ids are TLC fingerprints, which change on every fresh TLC run (a
+  # spec edit invalidates the cache and rebuilds the graph), so a failure
+  # term recorded against an older graph can carry highlight ids that no
+  # longer exist -- previously shown as a silently empty highlight. Detect
+  # that and say so in the note (keeping whatever still resolves).
+  defp stale_note(graph, highlight) do
+    if highlight == [] or Enum.all?(highlight, &Map.has_key?(graph.states, &1)) do
+      ""
+    else
+      found = Enum.filter(highlight, &Map.has_key?(graph.states, &1))
+
+      " WARNING: the recorded failure predates the current state graph" <>
+        " (#{length(highlight) - length(found)} of #{length(highlight)} highlights no longer resolve);" <>
+        " rerun `mix outlaw.test --force` to record a fresh one."
+    end
   end
 
   @spec html(model()) :: String.t()

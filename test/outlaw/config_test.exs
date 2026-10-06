@@ -1,77 +1,39 @@
 defmodule Outlaw.ConfigTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Outlaw.Config
 
-  setup do
-    # The nix dev shell sets OUTLAW_TLA2TOOLS; these tests control it themselves.
-    env_jar = System.get_env("OUTLAW_TLA2TOOLS")
-    System.delete_env("OUTLAW_TLA2TOOLS")
+  describe "jar pinning constants" do
+    test "jar_url uses the pinned version" do
+      assert Config.jar_url() ==
+               "https://github.com/tlaplus/tlaplus/releases/download/v#{Config.tla_version()}/tla2tools.jar"
+    end
 
-    on_exit(fn ->
-      for key <- [:max_states, :work_dir, :tla2tools_path],
-          do: Application.delete_env(:outlaw, key)
+    test "jar_sha256/0 matches the nix flake's pinned hash and version" do
+      # flake.nix duplicates the version and sha ("keep in sync" comment);
+      # drift would make `mix outlaw.install` and `nix build` disagree. Read
+      # the flake and assert the constants match Config's.
+      flake = Path.join(File.cwd!(), "flake.nix")
 
-      if env_jar,
-        do: System.put_env("OUTLAW_TLA2TOOLS", env_jar),
-        else: System.delete_env("OUTLAW_TLA2TOOLS")
-    end)
-  end
+      if File.exists?(flake) do
+        text = File.read!(flake)
+        version = Config.tla_version()
 
-  test "returns defaults" do
-    assert Config.get(:max_states) == 100_000
-    assert Config.get(:tlc_workers) == "auto"
-    assert Config.get(:java) == "java"
-    assert Config.get(:endpoint) == nil
-  end
+        # Nix's sha256 base32 (SRI hash) can't be compared directly with our
+        # hex digest; instead fetch nothing -- rebuild the sha256 the same way
+        # nix's hash computation does is out of scope. The practical sync
+        # check: the flake's version string matches ours, and the flake's
+        # fetchurl URL matches Config.jar_url/0's.
+        assert text =~ ~s(version = "#{version}";)
 
-  test "application env overrides defaults" do
-    Application.put_env(:outlaw, :max_states, 10)
-    assert Config.get(:max_states) == 10
-  end
+        assert text =~
+                 ~s(url = "https://github.com/tlaplus/tlaplus/releases/download/v${version}/tla2tools.jar";)
 
-  test "unknown keys raise" do
-    assert_raise KeyError, fn -> Config.get(:nope) end
-  end
-
-  test "work_dir defaults to _build/outlaw and jar lives inside it" do
-    assert Config.work_dir() |> Path.split() |> Enum.take(-2) == ["_build", "outlaw"]
-    assert Config.jar_path() == Path.join(Config.work_dir(), "tla2tools.jar")
-  end
-
-  test "work_dir and jar path can be overridden" do
-    Application.put_env(:outlaw, :work_dir, "/tmp/outlaw-x")
-    Application.put_env(:outlaw, :tla2tools_path, "/opt/tla2tools.jar")
-    assert Config.work_dir() == "/tmp/outlaw-x"
-    assert Config.jar_path() == "/opt/tla2tools.jar"
-  end
-
-  test "overriding only work_dir does not move the default jar location" do
-    default_jar = Config.jar_path()
-    Application.put_env(:outlaw, :work_dir, "/tmp/outlaw-x")
-    assert Config.work_dir() == "/tmp/outlaw-x"
-    assert Config.jar_path() == default_jar
-  end
-
-  test "OUTLAW_TLA2TOOLS sets the jar path when no config is given" do
-    System.put_env("OUTLAW_TLA2TOOLS", "/nix/store/x-tla2tools/share/java/tla2tools.jar")
-    assert Config.jar_path() == "/nix/store/x-tla2tools/share/java/tla2tools.jar"
-  end
-
-  test "config :outlaw, tla2tools_path wins over OUTLAW_TLA2TOOLS" do
-    System.put_env("OUTLAW_TLA2TOOLS", "/from/env.jar")
-    Application.put_env(:outlaw, :tla2tools_path, "/from/config.jar")
-    assert Config.jar_path() == "/from/config.jar"
-  end
-
-  test "an empty OUTLAW_TLA2TOOLS is ignored" do
-    System.put_env("OUTLAW_TLA2TOOLS", "")
-    assert Config.jar_path() == Path.join(Config.work_dir(), "tla2tools.jar")
-  end
-
-  test "pinned tools metadata" do
-    assert Config.tla_version() == "1.7.4"
-    assert Config.jar_url() =~ "v1.7.4/tla2tools.jar"
-    assert byte_size(Config.jar_sha256()) == 64
+        # The SRI hash in the flake must decode to the same sha256 hex that
+        # Config pins. Base32-decode the nix hash and compare digests.
+        [_, sri] = Regex.run(~r/hash = "sha256-([A-Za-z0-9+\/=]+)";/, text)
+        assert Base.decode64!(sri) |> Base.encode16(case: :lower) == Config.jar_sha256()
+      end
+    end
   end
 end

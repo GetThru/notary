@@ -8,6 +8,14 @@ defmodule Outlaw.Cache do
 
   @format "1"
 
+  # `binary_to_term/2` with `:safe` refuses to create atoms missing from this
+  # VM's atom table; a graph term never carries user-data atoms (state
+  # variables become `Outlaw.Value` structs, action names are strings), so
+  # `:safe` costs nothing and closes the atom-table-growth vector. A corrupt
+  # or drift-affected file raises ArgumentError, which `get/1` reports as a
+  # `:miss` (self-healing via a fresh TLC run), same as today.
+  @graph_marker {:outlaw_cache, "1", :state_graph}
+
   @spec key(Spec.t()) :: {:ok, String.t()} | {:error, Outlaw.Error.t()}
   def key(%Spec{} = spec) do
     with {:ok, hash} <- Spec.content_hash(spec) do
@@ -26,8 +34,23 @@ defmodule Outlaw.Cache do
   @spec get(String.t()) :: {:ok, term()} | :miss
   def get(key) do
     case File.read(path(key)) do
-      {:ok, binary} -> {:ok, :erlang.binary_to_term(binary)}
-      {:error, _} -> :miss
+      {:ok, binary} ->
+        term = :erlang.binary_to_term(binary, [:safe])
+
+        case term do
+          %{@graph_marker => true, graph: graph, stats: stats}
+          when is_map(graph) and is_map(stats) ->
+            {:ok, %{graph: graph, stats: stats}}
+
+          _ ->
+            # A well-formed term of the wrong shape (written by an older
+            # Outlaw whose %StateGraph{} differed): treat as a miss so the
+            # graph is rebuilt, instead of failing far downstream.
+            :miss
+        end
+
+      {:error, _} ->
+        :miss
     end
   rescue
     ArgumentError -> :miss
@@ -53,7 +76,19 @@ defmodule Outlaw.Cache do
     end
 
     tmp = target <> ".tmp#{System.unique_integer([:positive])}"
-    File.write!(tmp, :erlang.term_to_binary(value))
+
+    binary =
+      case value do
+        %{graph: _, stats: _} = entry ->
+          entry |> Map.put(@graph_marker, true) |> :erlang.term_to_binary()
+
+        # Non-graph values (tests): stored as-is, `get/1` treats them as a
+        # miss since they don't match the graph entry shape.
+        other ->
+          :erlang.term_to_binary(other)
+      end
+
+    File.write!(tmp, binary)
     File.rename!(tmp, target)
     :ok
   end
