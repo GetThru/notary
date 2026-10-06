@@ -31,8 +31,14 @@ defmodule Outlaw.StateGraph do
       end
     end)
     |> case do
-      {:ok, graph} -> {:ok, finalize(graph)}
-      error -> error
+      {:ok, graph} ->
+        case finalize(graph) do
+          {:ok, graph} -> {:ok, graph}
+          {:error, _} = error -> error
+        end
+
+      error ->
+        error
     end
   end
 
@@ -57,20 +63,52 @@ defmodule Outlaw.StateGraph do
     end
   end
 
+  # Every edge endpoint must be a defined node: `parse_line` silently skips
+  # lines it doesn't recognize (so a node-line spelling drift in TLC's dump
+  # would drop states while keeping edges), and a state missing here would
+  # otherwise surface far away as a bare `Map.fetch!` KeyError from
+  # `state/2` -- an error naming the state and the likely cause is owed
+  # instead.
   defp finalize(graph) do
     edges =
       Map.new(graph.edges, fn {key, targets} ->
         {key, targets |> Enum.reverse() |> Enum.uniq()}
       end)
 
-    variables =
-      case Map.values(graph.states) do
-        [first | _] -> first |> Map.keys() |> Enum.sort()
-        [] -> []
+    missing =
+      for {{from, _action}, targets} <- edges,
+          id <- Enum.uniq([from | targets]),
+          not Map.has_key?(graph.states, id),
+          uniq: true do
+        id
       end
+      |> Enum.sort()
 
-    %{graph | edges: edges, initial: Enum.reverse(graph.initial), variables: variables}
+    case missing do
+      [] ->
+        variables =
+          case Map.values(graph.states) do
+            [first | _] -> first |> Map.keys() |> Enum.sort()
+            [] -> []
+          end
+
+        {:ok, %{graph | edges: edges, initial: Enum.reverse(graph.initial), variables: variables}}
+
+      ids ->
+        {:error,
+         Error.new(
+           :unparseable_state,
+           "The TLC dot dump defined edges to or from state#{plural(ids)} #{Enum.join(Enum.take(ids, 5), ", ")}," <>
+             " but never those states' node lines" <>
+             "#{if length(ids) > 5, do: " (#{length(ids)} in total)", else: ""}." <>
+             " This usually means TLC's dot format changed; this is an Outlaw bug; please report it with the raw dump.",
+           %{missing_states: ids, edges: map_size(edges), states: map_size(graph.states)}
+         )}
+    end
   end
+
+  defp plural([_]), do: ""
+  defp plural(_), do: "s"
 
   defp unescape(text) do
     Regex.replace(~r/\\(.)/s, text, fn

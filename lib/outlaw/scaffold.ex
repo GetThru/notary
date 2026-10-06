@@ -20,9 +20,9 @@ defmodule Outlaw.Scaffold do
     mapping_files =
       if Keyword.get(opts, :mapping, true) do
         [
-          {"test/outlaw/#{snake}_spec.ex", render("mapping.ex.eex", assigns), :create},
+          {"test/outlaw/#{snake}_spec.ex", render("mapping.ex.eex", assigns), :create_if_missing},
           {"test/outlaw/#{snake}_conformance_test.exs",
-           render("conformance_test.exs.eex", assigns), :create}
+           render("conformance_test.exs.eex", assigns), :create_if_missing}
         ]
       else
         []
@@ -33,21 +33,29 @@ defmodule Outlaw.Scaffold do
 
   @spec write([file()], String.t()) :: {:ok, [String.t()]} | {:error, [String.t()]}
   def write(files, root \\ File.cwd!()) do
-    conflicts = for {path, _, :create} <- files, File.exists?(Path.join(root, path)), do: path
+    # Never overwrites: existing files are skipped. A run that would write
+    # nothing (everything already exists) fails with the existing `:create`
+    # files listed -- a silent no-op success would hide "this spec already
+    # exists" -- while a partial run (e.g. the documented rerun without
+    # --no-mapping after --no-mapping) succeeds, writing just the missing
+    # template files.
+    {to_write, skipped} =
+      Enum.split_with(files, fn {path, _, _} -> not File.exists?(Path.join(root, path)) end)
 
-    if conflicts != [] do
-      {:error, conflicts}
-    else
-      written =
-        for {path, content, mode} <- files,
-            not (mode == :create_if_missing and File.exists?(Path.join(root, path))) do
-          full = Path.join(root, path)
-          File.mkdir_p!(Path.dirname(full))
-          File.write!(full, content)
-          path
-        end
+    case {to_write, skipped} do
+      {[], _} ->
+        {:error, for({path, _, :create} <- files, do: path)}
 
-      {:ok, written}
+      _ ->
+        written =
+          Enum.map(to_write, fn {path, content, _mode} ->
+            full = Path.join(root, path)
+            File.mkdir_p!(Path.dirname(full))
+            File.write!(full, content)
+            path
+          end)
+
+        {:ok, written}
     end
   end
 
@@ -58,7 +66,7 @@ defmodule Outlaw.Scaffold do
         do:
           "3. Implement it (or ask an LLM to), completing test/outlaw/#{Macro.underscore(name)}_spec.ex.\n",
         else:
-          "3. When ready to implement, add a mapping module (rerun without --no-mapping for a template).\n"
+          "3. When ready to implement, rerun `mix outlaw.new #{name}` (without --no-mapping) to add the mapping template files; existing files are kept.\n"
 
     """
 

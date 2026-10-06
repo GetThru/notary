@@ -54,6 +54,19 @@ defmodule Outlaw.ScaffoldTest do
     assert File.read!(Path.join(root, "specs/AGENTS.md")) == "custom"
   end
 
+  test "rerun after --no-mapping adds the mapping template, keeping existing files", %{
+    tmp_dir: root
+  } do
+    assert {:ok, _} = Scaffold.write(files(mapping: false), root)
+
+    File.mkdir_p!(Path.join(root, "test/outlaw"))
+    File.write!(Path.join(root, "test/outlaw/checkout_flow_spec.ex"), "custom spec")
+    assert {:ok, written} = Scaffold.write(files(), root)
+
+    assert written == ["test/outlaw/checkout_flow_conformance_test.exs"]
+    assert File.read!(Path.join(root, "test/outlaw/checkout_flow_spec.ex")) == "custom spec"
+  end
+
   test "next_steps mentions mix.exs setup, the CLAUDE.md snippet and the lock" do
     text = Scaffold.next_steps("CheckoutFlow", true)
     assert text =~ ~s(preferred_envs: ["outlaw.test": :test, "outlaw.verify": :test])

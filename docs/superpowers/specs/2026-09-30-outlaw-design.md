@@ -326,7 +326,8 @@ generator: uniform picks from `actions/0`, no `:settle` points).
   a domain-specific "simpler" -- smallest first), keeping each change whose
   replay still shows the same defect: it fails with the original failure's
   kind, or both kinds are spec-level (`:init_mismatch`, `:illegal_transition`,
-  `:action_not_enabled`, `:rejected_with_side_effect`), so a spec violation is
+  `:action_not_enabled`, `:action_not_offered`, `:rejected_with_side_effect`),
+  so a spec violation is
   never traded for a timeout, crash, exception or stall. Rounds repeat until
   one changes nothing, capped at `:max_replays` (default 200) replays in total;
   each replay can cost up to `action_timeout` per step plus `settle_timeout`
@@ -555,12 +556,12 @@ LazyHTML (already a dependency, also used by `click/2`'s availability check):
 
 | Helper | Returns | Selector rule |
 |---|---|---|
-| `text(ctx, sel)` | trimmed text, internal whitespace runs collapsed to one space | exactly 1 match |
-| `texts(ctx, sel)` | list of texts (same normalisation), document order | 0+ |
+| `text(ctx, sel)` | trimmed text, internal whitespace runs collapsed to one space (`<script>`/`<style>` subtrees excluded, non-breaking spaces treated as whitespace) | exactly 1 match |
+| `texts(ctx, sel)` | list of texts (same normalisation, `<script>`/`<style>` subtrees excluded), document order, hidden elements included | 0+ |
 | `has?(ctx, sel)` | boolean (any match) | — |
 | `count(ctx, sel)` | number of matches | — |
 | `attr(ctx, sel, name)` | attribute value, or `nil` if absent (a boolean attribute like `disabled` gives `""`) | exactly 1 |
-| `value(ctx, sel)` | `<input>`'s `value` attribute (`""` if absent), `<textarea>`'s raw text content (not whitespace-collapsed), or `<select>`'s selected option's value (first option's, or `""`, if none is selected) | exactly 1 |
+| `value(ctx, sel)` | `<input>`'s `value` attribute (`""` if absent), `<textarea>`'s raw text content (not whitespace-collapsed), or `<select>`'s selected option's value (first option's, or `""`, if none is selected; an option with no `value` attribute falls back to its text) | exactly 1 |
 | `assigns(ctx)` | the LiveView socket assigns map | — |
 
 All of them read the current view's rendered HTML (`Phoenix.LiveViewTest.render(view)`)

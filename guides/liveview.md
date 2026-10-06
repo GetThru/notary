@@ -48,7 +48,7 @@ every call (you still can, to override it).
 The helpers exist only when both `phoenix_live_view` and `lazy_html` are
 available in the environment Outlaw is compiled in (usually `:test`).
 Otherwise `Outlaw.Conformance.LiveView` is never defined, and a mapping that
-imports it fails with "module Outlaw.Conformance.LiveView is not loaded".
+imports it fails with "module Outlaw.Conformance.LiveView is not available".
 
 Nothing in your application's own templates needs to depend on Outlaw: see
 "Observing the page" below — Outlaw reads your normal, visible markup.

@@ -102,4 +102,46 @@ defmodule Outlaw.StateGraphTest do
     assert {:error, %Outlaw.Error{kind: :unparseable_state, details: %{raw: "x = [oops"}}} =
              StateGraph.parse_dot(dot)
   end
+
+  test "an edge to a state whose node line was dropped is reported, not a faraway KeyError" do
+    dot = """
+    1 [label="x = 0"];
+    2 -> 3 [label="Inc"]
+    """
+
+    assert {:error, %Outlaw.Error{kind: :unparseable_state, message: msg}} =
+             StateGraph.parse_dot(dot)
+
+    assert msg =~ "states 2, 3"
+    assert msg =~ "never those states' node lines"
+  end
+
+  test "an edge from an undefined source state is reported too" do
+    dot = """
+    2 -> 1 [label="Inc"]
+    1 [label="x = 0"];
+    """
+
+    assert {:error, %Outlaw.Error{kind: :unparseable_state, message: msg}} =
+             StateGraph.parse_dot(dot)
+
+    assert msg =~ "state 2"
+  end
+
+  test "a node line with different style spelling drift is caught by the edge check" do
+    # Simulates TLC spelling `style=filled` (no spaces): the node regex no
+    # longer matches, so the node silently vanishes -- the finalize check must
+    # turn that into a clear error rather than a graph of edges without
+    # states.
+    dot = """
+    2 -> 1 [label="Inc"]
+    1 [label="x = 0",style=filled];
+    2 [label="x = 1",style=filled];
+    """
+
+    assert {:error, %Outlaw.Error{kind: :unparseable_state, message: msg}} =
+             StateGraph.parse_dot(dot)
+
+    assert msg =~ "states 1, 2"
+  end
 end

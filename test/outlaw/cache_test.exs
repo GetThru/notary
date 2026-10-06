@@ -15,7 +15,7 @@ defmodule Outlaw.CacheTest do
   end
 
   test "miss, put, hit", %{spec: spec} do
-    key = Cache.key(spec)
+    {:ok, key} = Cache.key(spec)
     assert key =~ ~r/^A-[0-9a-f]{16}$/
     assert Cache.get(key) == :miss
     assert Cache.put(key, %{graph: :g}) == :ok
@@ -23,10 +23,10 @@ defmodule Outlaw.CacheTest do
   end
 
   test "key changes when the spec changes and old entries are removed", %{spec: spec, dir: dir} do
-    old = Cache.key(spec)
+    {:ok, old} = Cache.key(spec)
     Cache.put(old, :old)
     File.write!(Path.join(dir, "A.tla"), "a changed")
-    new = Cache.key(spec)
+    {:ok, new} = Cache.key(spec)
     refute new == old
     Cache.put(new, :new)
     assert Cache.get(old) == :miss
@@ -34,7 +34,7 @@ defmodule Outlaw.CacheTest do
   end
 
   test "corrupt entries are a miss", %{spec: spec} do
-    key = Cache.key(spec)
+    {:ok, key} = Cache.key(spec)
     File.mkdir_p!(Path.dirname(Cache.path(key)))
     File.write!(Cache.path(key), "not a term")
     assert Cache.get(key) == :miss

@@ -10,7 +10,7 @@ defmodule Mix.Tasks.Outlaw.Verify do
   3. Runs conformance tests through each spec's mapping module.
 
   With `--json`, the last line of stdout is the JSON report (also written to
-  `_build/outlaw/report.json`).
+  `<work_dir>/report.json`, default `_build/outlaw/report.json`).
   """
   use Mix.Task
 

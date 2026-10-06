@@ -136,9 +136,8 @@ defmodule Outlaw.Conformance do
           | {:error, Outlaw.Conformance.Failure.t()}
           | {:error, Error.t()}
   def check(module, %StateGraph{} = graph, opts \\ []) do
-    with :ok <- validate(module, graph) do
-      fair = Spec.fair_actions(spec(module))
-
+    with :ok <- validate(module, graph),
+         {:ok, fair} <- Spec.fair_actions(spec(module)) do
       Outlaw.Conformance.Runner.check(
         module,
         graph,
@@ -152,11 +151,19 @@ defmodule Outlaw.Conformance do
   @spec internal_actions(module()) :: [String.t()]
   def internal_actions(module), do: module.__outlaw__() |> Map.get(:internal, []) |> Enum.sort()
 
-  @doc "The declared internal actions that the spec's text also marks fair (sorted)."
-  @spec fair_internal_actions(module()) :: [String.t()]
+  @doc """
+  The declared internal actions that the spec's text also marks fair (sorted).
+
+  Raises `Outlaw.Error` when the spec file named by the mapping's `spec:`
+  option can't be read (a typo'd path surfaces here, with the file named).
+  """
+  @spec fair_internal_actions(module()) :: [String.t()] | no_return()
   def fair_internal_actions(module) do
-    fair = Spec.fair_actions(spec(module))
-    Enum.filter(internal_actions(module), &MapSet.member?(fair, &1))
+    with {:ok, fair} <- Spec.fair_actions(spec(module)) do
+      Enum.filter(internal_actions(module), &MapSet.member?(fair, &1))
+    else
+      {:error, error} -> raise error
+    end
   end
 
   @doc """
@@ -179,14 +186,66 @@ defmodule Outlaw.Conformance do
 
   @spec discover_mappings(atom()) :: %{String.t() => module()}
   def discover_mappings(app) do
-    Application.load(app)
+    case Application.load(app) do
+      :ok ->
+        :ok
 
-    for module <- Application.spec(app, :modules) || [],
-        Code.ensure_loaded?(module),
-        function_exported?(module, :__outlaw__, 0),
-        module.__outlaw__().discover,
-        into: %{} do
-      {spec(module).name, module}
+      {:error, {:already_loaded, ^app}} ->
+        :ok
+
+      {:error, reason} ->
+        raise Error.new(
+                :invalid_mapping,
+                "Could not load app #{inspect(app)}: #{inspect(reason)}"
+              )
+    end
+
+    from_modules(
+      for module <- Application.spec(app, :modules) || [],
+          Code.ensure_loaded?(module),
+          function_exported?(module, :__outlaw__, 0),
+          module.__outlaw__().discover,
+          do: module
+    )
+  end
+
+  @doc """
+  Builds the spec-name → mapping-module map from already-filtered mapping
+  modules, raising a single actionable error when two of them map the same
+  spec (a stale `*_spec.ex` left next to a new one, or a copy): keyed on spec
+  name, the result would otherwise silently keep whichever module comes later
+  in `Application.spec`'s (unspecified) order and run the wrong mapping.
+  """
+  @spec from_modules([module()]) :: %{String.t() => module()}
+  def from_modules(modules) do
+    by_name =
+      for module <- modules, reduce: %{} do
+        acc -> Map.update(acc, spec(module).name, [module], &[module | &1])
+      end
+
+    duplicates =
+      for {name, mods} <- by_name,
+          mods = Enum.uniq(mods),
+          length(mods) > 1 do
+        {name, Enum.sort(mods)}
+      end
+      |> Enum.sort()
+
+    case duplicates do
+      [] ->
+        Map.new(by_name, fn {name, [module]} -> {name, module} end)
+
+      _ ->
+        problems =
+          duplicates
+          |> Enum.map_join("\n", fn {name, mods} ->
+            "  #{name}: #{Enum.map_join(mods, ", ", &inspect/1)}"
+          end)
+
+        raise Error.new(
+                :invalid_mapping,
+                "Multiple mapping modules map the same spec; keep only one per spec:\n#{problems}"
+              )
     end
   end
 end

@@ -58,13 +58,22 @@ defmodule Outlaw.Viewer do
         %{source: "t#{a.index}", target: "t#{b.index}", action: b.action || "?"}
       end)
 
-    last = states |> List.last() |> then(&"t#{&1.index}")
+    last =
+      case List.last(states) do
+        nil -> nil
+        last -> "t#{last.index}"
+      end
 
     extra =
       Enum.flat_map(trace, fn
-        %{back_to: n} -> [%{source: last, target: "t#{n}", action: "(loop)"}]
-        %{stuttering: true} -> [%{source: last, target: last, action: "(stutter)"}]
-        _ -> []
+        %{back_to: n} when last != nil ->
+          [%{source: last, target: "t#{n}", action: "(loop)"}]
+
+        %{stuttering: true} when last != nil ->
+          [%{source: last, target: last, action: "(stutter)"}]
+
+        _ ->
+          []
       end)
 
     %{

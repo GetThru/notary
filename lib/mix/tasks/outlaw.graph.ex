@@ -39,6 +39,7 @@ defmodule Mix.Tasks.Outlaw.Graph do
         if opts[:open], do: open(path)
 
       "mermaid" ->
+        if opts[:open], do: Mix.raise("--open is only supported with --format html")
         IO.write(Mermaid.render(model))
 
       other ->
@@ -102,6 +103,35 @@ defmodule Mix.Tasks.Outlaw.Graph do
         _ -> "xdg-open"
       end
 
-    System.cmd(command, [path], stderr_to_stdout: true)
+    case System.cmd(command, [path], stderr_to_stdout: true) do
+      {_, 0} ->
+        :ok
+
+      {output, status} ->
+        Mix.raise(
+          "Could not open #{path}: #{command} exited #{status}#{hint(output)}." <>
+            " Open it manually."
+        )
+    end
+  rescue
+    e in ErlangError ->
+      command =
+        case :os.type() do
+          {:unix, :darwin} -> "open"
+          {:win32, _} -> "explorer"
+          _ -> "xdg-open"
+        end
+
+      Mix.raise(
+        "Could not open #{path}: #{command} not found (#{Exception.message(e)})." <>
+          " Open the file manually."
+      )
+  end
+
+  defp hint(output) do
+    case String.trim(output || "") do
+      "" -> ""
+      trimmed -> ": #{trimmed}"
+    end
   end
 end

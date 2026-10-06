@@ -80,14 +80,14 @@ defmodule Outlaw.TLCTest do
       assert {:ok, graph, %{distinct_states: n}} = TLC.graph(spec)
       assert StateGraph.size(graph) == n
       assert graph.actions == MapSet.new(["Pay", "Ship", "GatewayDown", "GatewayUp"])
-      assert {:ok, _} = Cache.get(Cache.key(spec))
+      assert {:ok, _} = Cache.get(elem(Cache.key(spec), 1))
       assert {:ok, ^graph, _} = TLC.graph(spec)
     end
 
     test "graph does not cache failing specs" do
       {:ok, spec} = Spec.fetch("Inv", "test/fixtures/specs_bad")
       assert {:violation, _} = TLC.graph(spec)
-      assert Cache.get(Cache.key(spec)) == :miss
+      assert Cache.get(elem(Cache.key(spec), 1)) == :miss
     end
   end
 end

@@ -195,12 +195,12 @@ defmodule Outlaw.Tools.TLCRunner do
 
         case distinct_states(line) do
           n when is_integer(n) and n > st.max_states ->
-            kill(port)
+            stopped = stop_notice(kill(port))
 
             {:error,
              Error.new(
                :too_many_states,
-               "TLC found more than #{st.max_states} distinct states (#{n} so far) and was stopped. " <>
+               "TLC found more than #{st.max_states} distinct states (#{n} so far).#{stopped} " <>
                  "Use smaller CONSTANTS in the .cfg, or raise `config :outlaw, max_states: ...`.",
                %{distinct_states: n}
              )}
@@ -213,16 +213,16 @@ defmodule Outlaw.Tools.TLCRunner do
         {:ok, %{exit_status: status, output: output(st)}}
 
       {:deadline, ^ref} ->
-        kill(port)
+        stopped = stop_notice(kill(port))
 
         {:error,
-         Error.new(:tlc_timeout, "TLC did not finish within #{st.timeout}ms and was stopped.", %{
+         Error.new(:tlc_timeout, "TLC did not finish within #{st.timeout}ms.#{stopped}", %{
            output_tail: st.lines |> Enum.take(20) |> Enum.reverse() |> Enum.join("\n")
          })}
 
       {:cancel, ^ref} ->
-        kill(port)
-        {:error, Error.new(:tlc_cancelled, "The TLC run was cancelled.", %{})}
+        stopped = stop_notice(kill(port))
+        {:error, Error.new(:tlc_cancelled, "The TLC run was cancelled.#{stopped}", %{})}
 
       # Watchdog: the owner is gone, nobody will read a result; don't orphan TLC.
       {:DOWN, ^owner_mon, :process, _, _} ->
@@ -230,6 +230,14 @@ defmodule Outlaw.Tools.TLCRunner do
         :owner_down
     end
   end
+
+  # A suffix for "was stopped" claims: empty when the kill succeeded, else an
+  # honest warning -- closing the port does not kill the OS process, so a
+  # failed kill means a java process may still be running.
+  defp stop_notice(:ok), do: " It was stopped."
+
+  defp stop_notice({:error, reason}),
+    do: " Stop failed (#{reason}) -- the java process may still be running."
 
   # TLC 1.7.4 extracts the standard modules (Naturals.tla, ...) bundled in the
   # jar into java.io.tmpdir and parses them there. Without this, two concurrent
@@ -255,19 +263,48 @@ defmodule Outlaw.Tools.TLCRunner do
 
   defp output(st), do: Enum.reverse([st.partial | st.lines]) |> Enum.join("\n")
 
+  # Stops the TLC process: SIGKILL via the OS, then closes the port (closing a
+  # port does NOT kill the spawned OS process, so the kill must come first).
+  # Returns `:ok` or `{:error, reason}` -- a failed kill (e.g. no `kill`
+  # binary on PATH) is never silent: callers report that TLC may still be
+  # running instead of claiming it was stopped.
   defp kill(port) do
-    case Port.info(port, :os_pid) do
-      {:os_pid, pid} ->
-        System.cmd("kill", ["-KILL", Integer.to_string(pid)], stderr_to_stdout: true)
+    result =
+      case Port.info(port, :os_pid) do
+        {:os_pid, pid} ->
+          case System.cmd("kill", ["-KILL", Integer.to_string(pid)], stderr_to_stdout: true) do
+            {_, 0} -> :ok
+            {output, status} -> {:error, "kill exited #{status}: #{String.trim(output)}"}
+          end
 
-      nil ->
-        :ok
+        nil ->
+          # The port has no OS process (already exited); closing it is enough.
+          :ok
+      end
+
+    case result do
+      :ok ->
+        Port.close(port)
+        flush(port)
+
+      {:error, _} = error ->
+        flush(port)
+
+        try do
+          Port.close(port)
+        catch
+          _, _ -> :ok
+        end
+
+        error
     end
-
-    Port.close(port)
-    flush(port)
+  rescue
+    # `System.cmd` raises ErlangError (e.g. :enoent when the `kill` binary is
+    # missing) and `Port.close`/`Port.info` can raise on a dead port; either
+    # way the port still gets closed above, so just surface the failure.
+    e -> {:error, Exception.message(e)}
   catch
-    _, _ -> flush(port)
+    _, reason -> {:error, inspect(reason)}
   end
 
   defp flush(port) do

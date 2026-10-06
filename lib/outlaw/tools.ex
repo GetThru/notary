@@ -60,7 +60,13 @@ defmodule Outlaw.Tools do
     else
       with {:ok, body} <- download(url), :ok <- verify(body, sha) do
         File.mkdir_p!(Path.dirname(dest))
-        File.write!(dest, body)
+
+        # Atomic (tmp + rename): a crash mid-write must never leave a
+        # truncated jar at the live path, which `find_jar/0` (existence-only
+        # check) would then happily serve to every TLC run.
+        tmp = dest <> ".tmp#{System.unique_integer([:positive])}"
+        File.write!(tmp, body)
+        File.rename!(tmp, dest)
         {:ok, dest}
       end
     end

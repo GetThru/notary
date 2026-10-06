@@ -18,7 +18,7 @@ allowed (only before the first greeting).
 
 You need:
 
-- Elixir 1.18 or newer.
+- Elixir 1.19 or newer.
 - Java 11 or newer, to run the TLA+ model checker (TLC). Check with
   `java -version`. If you use Nix, Outlaw's flake can provide Java and the
   TLA+ tools jar for you: see "Using Nix" in the README. Then you can skip

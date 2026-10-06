@@ -23,33 +23,41 @@ defmodule Outlaw.Lock do
         "    #{JSON.encode!(file)}: #{JSON.encode!(hash)}"
       end)
 
-    File.write!(path(dir), "{\n  \"version\": 1,\n  \"files\": {\n#{entries}\n  }\n}\n")
+    # Atomic (tmp + rename), like `Outlaw.Cache.put/2`: a crash mid-write
+    # must never leave a truncated lock behind.
+    target = path(dir)
+    tmp = target <> ".tmp#{System.unique_integer([:positive])}"
+    File.write!(tmp, "{\n  \"version\": 1,\n  \"files\": {\n#{entries}\n  }\n}\n")
+    File.rename!(tmp, target)
     {:ok, Enum.map(hashes, &elem(&1, 0))}
   end
 
   @spec changes(String.t()) :: [change()]
   def changes(dir \\ Config.specs_dir()) do
     case read(dir) do
-      {:ok, locked} ->
-        current = current(dir)
-
-        changed =
-          for {f, h} <- current, Map.has_key?(locked, f), locked[f] != h, do: {:changed, f}
-
-        unlocked = for {f, _} <- current, not Map.has_key?(locked, f), do: {:unlocked, f}
-        removed = for {f, _} <- locked, not Map.has_key?(current, f), do: {:removed, f}
-        Enum.sort(changed ++ unlocked ++ removed)
-
-      {:error, error} ->
-        raise error
+      {:ok, locked} -> changes_from(locked, dir)
+      {:error, error} -> raise error
     end
+  end
+
+  # Computes changes against an already-decoded lock map, so `check/1` reads
+  # the lock file once: `read/1` twice (once here, once via `changes/1`)
+  # would race a concurrent edit/corruption between the reads and turn the
+  # promised `{:error, :spec_lock_corrupt}` result into a raise.
+  defp changes_from(locked, dir) do
+    current = current(dir)
+
+    changed = for {f, h} <- current, Map.has_key?(locked, f), locked[f] != h, do: {:changed, f}
+    unlocked = for {f, _} <- current, not Map.has_key?(locked, f), do: {:unlocked, f}
+    removed = for {f, _} <- locked, not Map.has_key?(current, f), do: {:removed, f}
+    Enum.sort(changed ++ unlocked ++ removed)
   end
 
   @spec check(String.t()) :: :ok | {:error, Error.t()}
   def check(dir \\ Config.specs_dir()) do
     case read(dir) do
-      {:ok, _} ->
-        case changes(dir) do
+      {:ok, locked} ->
+        case changes_from(locked, dir) do
           [] ->
             :ok
 

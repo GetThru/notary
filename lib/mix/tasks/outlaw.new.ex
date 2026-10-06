@@ -5,7 +5,9 @@ defmodule Mix.Tasks.Outlaw.New do
 
   Creates `specs/Name.tla`, `specs/Name.cfg`, `specs/AGENTS.md` (once), and
   unless `--no-mapping`, `test/outlaw/name_spec.ex` plus a conformance test.
-  Never overwrites existing files.
+  Never overwrites an existing file: spec files refuse the run, mapping
+  template files are simply skipped when already present (so a rerun without
+  `--no-mapping` after `--no-mapping` adds just the template).
   """
   use Mix.Task
 

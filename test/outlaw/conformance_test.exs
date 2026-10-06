@@ -100,6 +100,26 @@ defmodule Outlaw.ConformanceTest do
     assert mappings["Workflow"] == Fixtures.WorkflowSpec
   end
 
+  test "from_modules raises when two mappings map the same spec" do
+    # WizardEarlyPaySpec is `discover: false` but maps the same Wizard spec;
+    # handing both modules to from_modules must fail loudly instead of
+    # silently running whichever module sorts last.
+    assert_raise Outlaw.Error,
+                 ~r/Multiple mapping modules map the same spec[\s\S]*Wizard:/s,
+                 fn ->
+                   Conformance.from_modules([
+                     Fixtures.WizardSpec,
+                     Fixtures.WizardEarlyPaySpec,
+                     Fixtures.CounterSpec
+                   ])
+                 end
+  end
+
+  test "from_modules accepts a single mapping per spec" do
+    assert Conformance.from_modules([Fixtures.WizardSpec, Fixtures.CounterSpec])["Wizard"] ==
+             Fixtures.WizardSpec
+  end
+
   test "every failure kind has an explanation" do
     for kind <- Failure.kinds(), do: assert(Failure.explanation(kind) =~ ~r/\w/)
   end

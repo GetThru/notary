@@ -41,6 +41,16 @@ defmodule Outlaw.TLC.Output do
           match = Regex.run(@start, line) ->
             [_, code, severity] = match
 
+            # A new STARTMSG while a message is still in flight (no ENDMSG
+            # between them) keeps the in-flight message instead of dropping
+            # it -- silently discarding it could lose a violation's body (and
+            # its trace) on truncated or drift-affected output.
+            items =
+              case current do
+                nil -> items
+                _ -> [{:message, finish(current)} | items]
+              end
+
             current = %{
               code: String.to_integer(code),
               severity: String.to_integer(severity),
@@ -160,14 +170,23 @@ defmodule Outlaw.TLC.Output do
     end
   end
 
-  defp trace_step(%{code: 2218, body: body}) do
-    [_, index] = Regex.run(~r/^(\d+):/, body)
-    %{index: String.to_integer(index), stuttering: true}
-  end
+  defp trace_step(%{code: code, body: body}) when code in [2218, 2122] do
+    case Regex.run(~r/^(\d+):/, body) do
+      [_, index] ->
+        index = String.to_integer(index)
 
-  defp trace_step(%{code: 2122, body: body}) do
-    [_, index] = Regex.run(~r/^(\d+):/, body)
-    %{index: String.to_integer(index), back_to: String.to_integer(index)}
+        # 2218: "back to state N" is rendered upstream as stuttering forever
+        # (TLC's "Back to state" marker); 2122 is the loop-back marker.
+        case code do
+          2218 -> %{index: index, stuttering: true}
+          _ -> %{index: index, back_to: index}
+        end
+
+      # Malformed body (TLC version drift): degrade to a generic trace step
+      # rather than crash interpret/2 with a MatchError.
+      nil ->
+        trace_step(%{body: body})
+    end
   end
 
   defp trace_step(%{body: body}) do

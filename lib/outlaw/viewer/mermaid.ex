@@ -20,7 +20,7 @@ defmodule Outlaw.Viewer.Mermaid do
 
     lines =
       ["stateDiagram-v2"] ++
-        if(note, do: ["    %% #{note}"], else: []) ++
+        if(note, do: note_lines(note), else: []) ++
         Enum.map(nodes, &~s(    state "#{label(&1)}" as #{alias_of[&1.id]})) ++
         for(n <- nodes, n.initial, do: "    [*] --> #{alias_of[n.id]}") ++
         Enum.map(
@@ -30,6 +30,12 @@ defmodule Outlaw.Viewer.Mermaid do
 
     Enum.join(lines, "\n") <> "\n"
   end
+
+  # A note is emitted as `%%` comment lines; TLC violation messages are
+  # multi-line, so the note must be split -- everything after the first line
+  # would otherwise become bare Mermaid (a parse error).
+  defp note_lines(note),
+    do: note |> String.split("\n") |> Enum.map(&("    %% " <> &1))
 
   defp select(%{nodes: nodes}) when length(nodes) <= @max, do: {nodes, nil}
 
@@ -82,8 +88,11 @@ defmodule Outlaw.Viewer.Mermaid do
   end
 
   defp escape(text) do
+    # `#` starts a Mermaid entity reference (`#quot;` below is one), so a
+    # literal `#` must itself be escaped or entity syntax could be injected.
     text
     |> String.replace("\n", " ")
+    |> String.replace("#", "#num;")
     |> String.replace("\"", "#quot;")
     |> String.replace("<", "#lt;")
     |> String.replace(">", "#gt;")

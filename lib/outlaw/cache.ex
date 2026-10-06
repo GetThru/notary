@@ -8,14 +8,16 @@ defmodule Outlaw.Cache do
 
   @format "1"
 
-  @spec key(Spec.t()) :: String.t()
+  @spec key(Spec.t()) :: {:ok, String.t()} | {:error, Outlaw.Error.t()}
   def key(%Spec{} = spec) do
-    digest =
-      :crypto.hash(:sha256, [Spec.content_hash(spec), Config.tla_version(), @format])
-      |> Base.encode16(case: :lower)
-      |> binary_part(0, 16)
+    with {:ok, hash} <- Spec.content_hash(spec) do
+      digest =
+        :crypto.hash(:sha256, [hash, Config.tla_version(), @format])
+        |> Base.encode16(case: :lower)
+        |> binary_part(0, 16)
 
-    "#{spec.name}-#{digest}"
+      {:ok, "#{spec.name}-#{digest}"}
+    end
   end
 
   @spec path(String.t()) :: String.t()
@@ -42,7 +44,7 @@ defmodule Outlaw.Cache do
 
     dir = Path.dirname(target)
 
-    for old <- File.ls!(dir) || [] do
+    for old <- File.ls!(dir) do
       old_path = Path.join(dir, old)
 
       if String.match?(old, pattern) && old_path != target do

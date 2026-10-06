@@ -48,7 +48,7 @@ defmodule Outlaw.SpecTest do
     ])
 
     spec = Spec.from_path(Path.join(dir, "X.tla"))
-    assert Spec.fair_actions(spec) == MapSet.new(["Reap", "Kill", "Pay"])
+    assert {:ok, MapSet.new(["Reap", "Kill", "Pay"])} == Spec.fair_actions(spec)
   end
 
   test "fair_actions strips \\* line comments and (* *) block comments first", %{tmp_dir: dir} do
@@ -65,7 +65,7 @@ defmodule Outlaw.SpecTest do
     ])
 
     spec = Spec.from_path(Path.join(dir, "X.tla"))
-    assert Spec.fair_actions(spec) == MapSet.new(["Real"])
+    assert {:ok, MapSet.new(["Real"])} == Spec.fair_actions(spec)
   end
 
   test "fair_actions treats (* (* *) *) block comments as nested, not as ending at the first *)",
@@ -81,7 +81,7 @@ defmodule Outlaw.SpecTest do
     ])
 
     spec = Spec.from_path(Path.join(dir, "X.tla"))
-    assert Spec.fair_actions(spec) == MapSet.new(["Real"])
+    assert {:ok, MapSet.new(["Real"])} == Spec.fair_actions(spec)
   end
 
   test "fair_actions returns names even when they are not actual graph actions (e.g. Next)", %{
@@ -95,7 +95,7 @@ defmodule Outlaw.SpecTest do
     ])
 
     spec = Spec.from_path(Path.join(dir, "X.tla"))
-    assert Spec.fair_actions(spec) == MapSet.new(["Next"])
+    assert {:ok, MapSet.new(["Next"])} == Spec.fair_actions(spec)
   end
 
   test "an unclosed (* inside a \\* line comment doesn't blank the rest of the file", %{
@@ -114,7 +114,7 @@ defmodule Outlaw.SpecTest do
     ])
 
     spec = Spec.from_path(Path.join(dir, "X.tla"))
-    assert Spec.fair_actions(spec) == MapSet.new(["Tick"])
+    assert {:ok, MapSet.new(["Tick"])} == Spec.fair_actions(spec)
   end
 
   test "a \\* inside a string literal is not treated as a comment" do
@@ -125,13 +125,30 @@ defmodule Outlaw.SpecTest do
   test "content hash changes with the spec, its cfg, or a sibling module", %{tmp_dir: dir} do
     write(dir, [{"A.tla", "a"}, {"A.cfg", "c"}, {"Helper.tla", "h"}])
     {:ok, spec} = Spec.fetch("A", dir)
-    h1 = Spec.content_hash(spec)
-    assert h1 == Spec.content_hash(spec)
+    {:ok, h1} = Spec.content_hash(spec)
+    assert h1 == elem(Spec.content_hash(spec), 1)
 
     for {file, body} <- [{"A.cfg", "c2"}, {"Helper.tla", "h2"}, {"A.tla", "a2"}] do
-      before = Spec.content_hash(spec)
+      before = elem(Spec.content_hash(spec), 1)
       File.write!(Path.join(dir, file), body)
-      refute Spec.content_hash(spec) == before
+      refute elem(Spec.content_hash(spec), 1) == before
     end
+  end
+
+  test "content_hash and fair_actions report a missing spec file as an actionable error", %{
+    tmp_dir: dir
+  } do
+    write(dir, [{"A.tla", "a"}, {"A.cfg", "c"}])
+    {:ok, spec} = Spec.fetch("A", dir)
+    File.rm!(Path.join(dir, "A.cfg"))
+
+    assert {:error, %Outlaw.Error{kind: :unknown_spec, message: msg}} = Spec.content_hash(spec)
+    assert msg =~ "A.cfg"
+    assert msg =~ "spec:"
+
+    spec = Spec.from_path(Path.join(dir, "Missing.tla"))
+
+    assert {:error, %Outlaw.Error{kind: :unknown_spec, message: msg}} = Spec.fair_actions(spec)
+    assert msg =~ "Missing.tla"
   end
 end

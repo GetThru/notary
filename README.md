@@ -272,7 +272,8 @@ Measured on `specs/TLCRunner.tla` (`mix outlaw.verify --seed 1..10`, default
   conformance on 0 of 10 seeds, because an unfair internal action is never
   required to fire; only the coverage report (`warning: never reached:
   LimitKill`) hinted at it. The text warning names a count and the first
-  unreached state; the full list is in `--json`'s `coverage.states.unreached`.
+  unreached state; `--json`'s `coverage.states.unreached` lists the gap
+  (capped at 20 entries, like the text warning).
   Read coverage warnings rather than relying on conformance pass/fail alone.
 
 Raise `--max-runs` for specs where a missed-but-possible path matters. It

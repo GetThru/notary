@@ -58,14 +58,38 @@ defmodule Outlaw.Spec do
     new(tla, Path.rootname(tla) <> ".cfg")
   end
 
-  @spec content_hash(t()) :: String.t()
+  @spec content_hash(t()) :: {:ok, String.t()} | {:error, Error.t()}
   def content_hash(%__MODULE__{} = spec) do
     files = Enum.sort(Path.wildcard(Path.join(spec.dir, "*.tla"))) ++ [spec.cfg_path]
 
-    files
-    |> Enum.map(fn file -> [Path.basename(file), 0, File.read!(file), 0] end)
-    |> then(&:crypto.hash(:sha256, &1))
-    |> Base.encode16(case: :lower)
+    with :ok <- ensure_readable(files, spec) do
+      hash =
+        files
+        |> Enum.map(fn file -> [Path.basename(file), 0, File.read!(file), 0] end)
+        |> then(&:crypto.hash(:sha256, &1))
+        |> Base.encode16(case: :lower)
+
+      {:ok, hash}
+    end
+  end
+
+  # `File.read!/1` here would surface a typo'd `spec:` path (e.g. `use
+  # Outlaw.Conformance, spec: "spec/Bank.tla"`) as a raw File.Error from
+  # deep inside cache-key code; the files were wildcarded just above, so a
+  # missing one is a race -- both deserve the spec-not-found error.
+  defp ensure_readable(files, spec) do
+    missing = Enum.reject(files, &File.exists?/1)
+
+    if missing == [] do
+      :ok
+    else
+      {:error,
+       Error.new(
+         :unknown_spec,
+         "Spec #{spec.name} not found (looked for #{Enum.map_join(missing, ", ", &Path.relative_to_cwd/1)}). " <>
+           "Check the `spec:` path in the mapping module's `use Outlaw.Conformance`."
+       )}
+    end
   end
 
   @doc """
@@ -87,14 +111,25 @@ defmodule Outlaw.Spec do
   """
   @fairness ~r/\b(?:WF|SF)_(?:<<[^>]*>>|[A-Za-z_][A-Za-z0-9_]*)\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)/
 
-  @spec fair_actions(t()) :: MapSet.t(String.t())
+  @spec fair_actions(t()) :: {:ok, MapSet.t(String.t())} | {:error, Error.t()}
   def fair_actions(%__MODULE__{tla_path: tla_path}) do
-    tla_path
-    |> File.read!()
-    |> strip_comments()
-    |> then(&Regex.scan(@fairness, &1))
-    |> Enum.map(fn [_, name] -> name end)
-    |> MapSet.new()
+    case File.read(tla_path) do
+      {:ok, text} ->
+        {:ok,
+         text
+         |> strip_comments()
+         |> then(&Regex.scan(@fairness, &1))
+         |> Enum.map(fn [_, name] -> name end)
+         |> MapSet.new()}
+
+      {:error, reason} ->
+        {:error,
+         Error.new(
+           :unknown_spec,
+           "Could not read #{Path.relative_to_cwd(tla_path)}: #{inspect(reason)}. " <>
+             "Check the `spec:` path in the mapping module's `use Outlaw.Conformance`."
+         )}
+    end
   end
 
   @doc """

@@ -58,7 +58,19 @@ defmodule Outlaw.CLI do
     Outlaw.Conformance.discover_mappings(Mix.Project.config()[:app])
   end
 
-  def conformance_opts(opts), do: Keyword.take(opts, [:seed, :max_runs, :max_steps, :force])
+  def conformance_opts(opts) do
+    validate_positive!(opts, :max_runs)
+    validate_positive!(opts, :max_steps)
+    Keyword.take(opts, [:seed, :max_runs, :max_steps, :force])
+  end
+
+  defp validate_positive!(opts, key) do
+    case Keyword.fetch(opts, key) do
+      {:ok, n} when is_integer(n) and n >= 1 -> :ok
+      {:ok, n} -> Mix.raise("#{key} must be an integer >= 1, got: #{inspect(n)}")
+      :error -> :ok
+    end
+  end
 
   @doc """
   Encodes `map` as JSON, writes it to `<work_dir>/report.json`, and prints it
