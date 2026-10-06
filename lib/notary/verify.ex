@@ -1,0 +1,118 @@
+defmodule Notary.Verify do
+  @moduledoc "Runs Notary's verification stages and assembles reports (shared by the mix tasks)."
+
+  alias Notary.{Conformance, Error, Lock, Report, Spec, TLC}
+  alias Notary.Conformance.Failure
+
+  @graph_opts [:force, :timeout, :max_states]
+  @conformance_opts [:seed, :max_runs, :max_steps, :action_timeout]
+
+  @spec lock_stage(String.t()) :: Report.stage()
+  def lock_stage(dir) do
+    case Lock.check(dir) do
+      :ok -> stage(:lock, :pass, :ok)
+      {:error, error} -> stage(:lock, :fail, {:error, error})
+    end
+  end
+
+  @spec check_spec(Spec.t(), keyword()) :: Report.spec_result()
+  def check_spec(%Spec{} = spec, opts \\ []) do
+    extra = %{spec: spec}
+
+    stage =
+      case TLC.check(spec, Keyword.take(opts, @graph_opts)) do
+        {:ok, stats} -> stage(:check, :pass, {:ok, stats}, extra)
+        {:violation, v} -> stage(:check, :fail, {:violation, v}, extra)
+        {:error, error} -> stage(:check, :error, {:error, error}, extra)
+      end
+
+    spec_result(spec.name, [stage])
+  end
+
+  @spec test_spec(Spec.t(), %{String.t() => module()}, keyword()) :: Report.spec_result()
+  def test_spec(%Spec{} = spec, mappings, opts \\ []) do
+    check_extra = %{spec: spec}
+
+    stages =
+      case TLC.graph(spec, Keyword.take(opts, @graph_opts)) do
+        {:ok, graph, stats} ->
+          [
+            stage(:check, :pass, {:ok, stats}, check_extra),
+            conformance_stage(spec, graph, mappings, opts)
+          ]
+
+        {:violation, v} ->
+          [
+            stage(:check, :fail, {:violation, v}, check_extra),
+            stage(:conformance, :skipped, :skipped)
+          ]
+
+        {:error, error} ->
+          [
+            stage(:check, :error, {:error, error}, check_extra),
+            stage(:conformance, :skipped, :skipped)
+          ]
+      end
+
+    spec_result(spec.name, stages)
+  end
+
+  defp conformance_stage(spec, graph, mappings, opts) do
+    case Map.fetch(mappings, spec.name) do
+      :error ->
+        extra = %{internal: [], fair: [], spec: spec, mapping: nil}
+        stage(:conformance, :fail, {:error, missing_mapping(spec)}, extra)
+
+      {:ok, module} ->
+        internal = Conformance.internal_actions(module)
+        fair = Conformance.fair_internal_actions(module)
+        extra = %{internal: internal, fair: fair, spec: spec, mapping: module}
+
+        case Conformance.check(module, graph, Keyword.take(opts, @conformance_opts)) do
+          {:ok, summary} ->
+            stage(:conformance, :pass, {:ok, summary}, extra)
+
+          {:error, %Failure{} = failure} ->
+            write_failure_artifact(spec.name, graph, failure)
+            stage(:conformance, :fail, {:error, failure}, extra)
+
+          {:error, %Error{} = error} ->
+            stage(:conformance, :error, {:error, error}, extra)
+        end
+    end
+  end
+
+  # Recording a failure artifact is a nice-to-have for `--trace failure`; if the
+  # work dir can't be written to (full disk, read-only mount, blocked path), the
+  # conformance failure itself must still be reported rather than crashing here.
+  defp write_failure_artifact(name, graph, failure) do
+    Notary.Viewer.write_failure(name, graph, failure)
+    :ok
+  rescue
+    _ in [File.Error, ArgumentError] -> :ok
+  end
+
+  defp missing_mapping(spec) do
+    rel = Path.relative_to_cwd(spec.tla_path)
+
+    Error.new(
+      :missing_mapping,
+      "No mapping module for spec #{spec.name}. Create one under test/notary/ with " <>
+        "`use Notary.Conformance, spec: \"#{rel}\"` (see `mix notary.new`)."
+    )
+  end
+
+  @spec report(Report.stage() | nil, [Report.spec_result()]) :: Report.report()
+  def report(lock, specs) do
+    ok? = (lock == nil or lock.status == :pass) and Enum.all?(specs, &(&1.status == :pass))
+    %{status: if(ok?, do: :pass, else: :fail), lock: lock, specs: specs}
+  end
+
+  defp spec_result(name, stages) do
+    ok? = Enum.all?(stages, &(&1.status in [:pass, :skipped]))
+    %{spec: name, status: if(ok?, do: :pass, else: :fail), stages: stages}
+  end
+
+  defp stage(name, status, payload, extra \\ %{}),
+    do: Map.merge(%{stage: name, status: status, payload: payload}, extra)
+end

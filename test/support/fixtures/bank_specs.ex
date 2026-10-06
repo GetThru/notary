@@ -1,7 +1,7 @@
-defmodule Outlaw.Fixtures.BankSpec do
+defmodule Notary.Fixtures.BankSpec do
   @moduledoc false
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Bank.tla", observe: ["balance"]
-  alias Outlaw.Fixtures.Bank
+  use Notary.Conformance, spec: "test/fixtures/specs/Bank.tla", observe: ["balance"]
+  alias Notary.Fixtures.Bank
 
   @impl true
   def init, do: Bank.start_link(max: 3)
@@ -23,18 +23,18 @@ defmodule Outlaw.Fixtures.BankSpec do
   defp reply({:error, reason}, pid), do: {:rejected, reason, pid}
 end
 
-defmodule Outlaw.Fixtures.BankOverdraftSpec do
+defmodule Notary.Fixtures.BankOverdraftSpec do
   @moduledoc false
   # Bug: overdrafts allowed.
-  use Outlaw.Conformance,
+  use Notary.Conformance,
     spec: "test/fixtures/specs/Bank.tla",
     observe: ["balance"],
     discover: false
 
-  alias Outlaw.Fixtures.Bank
+  alias Notary.Fixtures.Bank
 
   def init, do: Bank.start_link(max: 3, allow_overdraft: true)
-  defdelegate actions(), to: Outlaw.Fixtures.BankSpec
-  defdelegate action(name, params, pid), to: Outlaw.Fixtures.BankSpec
-  defdelegate project(pid), to: Outlaw.Fixtures.BankSpec
+  defdelegate actions(), to: Notary.Fixtures.BankSpec
+  defdelegate action(name, params, pid), to: Notary.Fixtures.BankSpec
+  defdelegate project(pid), to: Notary.Fixtures.BankSpec
 end

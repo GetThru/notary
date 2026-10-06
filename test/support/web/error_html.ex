@@ -1,4 +1,4 @@
-defmodule Outlaw.Fixtures.Web.ErrorHTML do
+defmodule Notary.Fixtures.Web.ErrorHTML do
   @moduledoc false
 
   # Lets the endpoint render (and re-raise) router/controller errors such as

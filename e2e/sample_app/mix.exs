@@ -7,14 +7,14 @@ defmodule SampleApp.MixProject do
       version: "0.1.0",
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
-      deps: [{:outlaw, path: System.get_env("OUTLAW_PATH", "../.."), only: [:dev, :test]}]
+      deps: [{:notary, path: System.get_env("NOTARY_PATH", "../.."), only: [:dev, :test]}]
     ]
   end
 
-  def cli, do: [preferred_envs: ["outlaw.test": :test, "outlaw.verify": :test]]
+  def cli, do: [preferred_envs: ["notary.test": :test, "notary.verify": :test]]
 
   def application, do: [extra_applications: [:logger]]
 
-  defp elixirc_paths(:test), do: ["lib", "test/outlaw"]
+  defp elixirc_paths(:test), do: ["lib", "test/notary"]
   defp elixirc_paths(_), do: ["lib"]
 end

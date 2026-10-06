@@ -1,7 +1,7 @@
-defmodule Outlaw.Fixtures.CounterSpec do
+defmodule Notary.Fixtures.CounterSpec do
   @moduledoc false
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla"
-  alias Outlaw.Fixtures.Counter
+  use Notary.Conformance, spec: "test/fixtures/specs/Counter.tla"
+  alias Notary.Fixtures.Counter
 
   @impl true
   def init, do: Counter.start_link(3)
@@ -29,10 +29,10 @@ defmodule Outlaw.Fixtures.CounterSpec do
   def teardown(pid), do: Agent.stop(pid)
 end
 
-defmodule Outlaw.Fixtures.CounterNoGuardSpec do
+defmodule Notary.Fixtures.CounterNoGuardSpec do
   @moduledoc false
   # Bug: Inc ignores the Max guard.
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+  use Notary.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
 
   def init, do: Agent.start_link(fn -> 0 end)
   def actions, do: %{"Inc" => StreamData.constant(%{})}
@@ -45,10 +45,10 @@ defmodule Outlaw.Fixtures.CounterNoGuardSpec do
   def project(pid), do: %{"x" => Agent.get(pid, & &1)}
 end
 
-defmodule Outlaw.Fixtures.CounterBadResetSpec do
+defmodule Notary.Fixtures.CounterBadResetSpec do
   @moduledoc false
   # Bug: Reset goes to 1 instead of 0.
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+  use Notary.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
 
   def init, do: Agent.start_link(fn -> 0 end)
   def actions, do: %{"Reset" => StreamData.constant(%{})}
@@ -61,12 +61,12 @@ defmodule Outlaw.Fixtures.CounterBadResetSpec do
   def project(pid), do: %{"x" => Agent.get(pid, & &1)}
 end
 
-defmodule Outlaw.Fixtures.CounterBadResetTeardownSpec do
+defmodule Notary.Fixtures.CounterBadResetTeardownSpec do
   @moduledoc false
   # Same bug as CounterBadResetSpec, but also has a teardown/1 — regression
   # fixture for making sure teardown doesn't mislabel details.during on a
   # spec-level failure (controller ruling R12, fix round 1, item 1).
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+  use Notary.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
 
   def init, do: Agent.start_link(fn -> 0 end)
   def actions, do: %{"Reset" => StreamData.constant(%{})}
@@ -80,7 +80,7 @@ defmodule Outlaw.Fixtures.CounterBadResetTeardownSpec do
   def teardown(pid), do: Agent.stop(pid)
 end
 
-defmodule Outlaw.Fixtures.CounterNamedSpec do
+defmodule Notary.Fixtures.CounterNamedSpec do
   @moduledoc false
   # Regression fixture (controller ruling R12, fix round 1, item 3): init
   # starts a *named* Agent and there's no teardown/1, so cleanup relies
@@ -88,9 +88,9 @@ defmodule Outlaw.Fixtures.CounterNamedSpec do
   # guarantee the Agent is fully gone before the next run's init/0, a later
   # run's `Agent.start_link(..., name: ...)` races and fails with
   # `{:already_started, pid}`. Otherwise behaves exactly like CounterSpec.
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+  use Notary.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
 
-  def init, do: Agent.start_link(fn -> %{x: 0, max: 3} end, name: Outlaw.Fixtures.NamedCounter)
+  def init, do: Agent.start_link(fn -> %{x: 0, max: 3} end, name: Notary.Fixtures.NamedCounter)
   def actions, do: %{"Inc" => StreamData.constant(%{}), "Reset" => StreamData.constant(%{})}
 
   def action("Inc", _, pid) do
@@ -111,10 +111,10 @@ defmodule Outlaw.Fixtures.CounterNamedSpec do
   def project(pid), do: %{"x" => Agent.get(pid, & &1.x)}
 end
 
-defmodule Outlaw.Fixtures.CounterSideEffectSpec do
+defmodule Notary.Fixtures.CounterSideEffectSpec do
   @moduledoc false
   # Bug: a rejected Inc still changes state.
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+  use Notary.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
 
   def init, do: Agent.start_link(fn -> 0 end)
   def actions, do: %{"Inc" => StreamData.constant(%{})}
@@ -132,58 +132,58 @@ defmodule Outlaw.Fixtures.CounterSideEffectSpec do
   def project(pid), do: %{"x" => Agent.get(pid, & &1)}
 end
 
-defmodule Outlaw.Fixtures.CounterBadInitSpec do
+defmodule Notary.Fixtures.CounterBadInitSpec do
   @moduledoc false
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+  use Notary.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
   def init, do: Agent.start_link(fn -> 7 end)
   def actions, do: %{"Inc" => StreamData.constant(%{})}
   def action("Inc", _, pid), do: {:ok, pid}
   def project(pid), do: %{"x" => Agent.get(pid, & &1)}
 end
 
-defmodule Outlaw.Fixtures.CounterBadProjectionSpec do
+defmodule Notary.Fixtures.CounterBadProjectionSpec do
   @moduledoc false
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+  use Notary.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
   def init, do: Agent.start_link(fn -> 0 end)
   def actions, do: %{"Inc" => StreamData.constant(%{})}
   def action("Inc", _, pid), do: {:ok, pid}
   def project(_pid), do: %{"x" => 0, "extra" => 1}
 end
 
-defmodule Outlaw.Fixtures.CounterBadProjectionValueSpec do
+defmodule Notary.Fixtures.CounterBadProjectionValueSpec do
   @moduledoc false
-  # Bug: project/1 returns a value outside the Outlaw.Value representation
+  # Bug: project/1 returns a value outside the Notary.Value representation
   # (regression fixture for the :invalid_projection value-validation finding).
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+  use Notary.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
   def init, do: Agent.start_link(fn -> 0 end)
   def actions, do: %{"Inc" => StreamData.constant(%{})}
   def action("Inc", _, pid), do: {:ok, pid}
   def project(_pid), do: %{"x" => nil}
 end
 
-defmodule Outlaw.Fixtures.CounterBadInitResultSpec do
+defmodule Notary.Fixtures.CounterBadInitResultSpec do
   @moduledoc false
   # Bug: init/0 returns something other than {:ok, ctx} (regression fixture for
   # the :invalid_action_result finding on init/0's own contract).
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+  use Notary.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
   def init, do: :ok
   def actions, do: %{"Inc" => StreamData.constant(%{})}
   def action("Inc", _, pid), do: {:ok, pid}
   def project(pid), do: %{"x" => pid}
 end
 
-defmodule Outlaw.Fixtures.CounterRaisingSpec do
+defmodule Notary.Fixtures.CounterRaisingSpec do
   @moduledoc false
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+  use Notary.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
   def init, do: Agent.start_link(fn -> 0 end)
   def actions, do: %{"Inc" => StreamData.constant(%{})}
   def action("Inc", _, _pid), do: raise("boom")
   def project(pid), do: %{"x" => Agent.get(pid, & &1)}
 end
 
-defmodule Outlaw.Fixtures.CounterSlowSpec do
+defmodule Notary.Fixtures.CounterSlowSpec do
   @moduledoc false
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+  use Notary.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
   def init, do: Agent.start_link(fn -> 0 end)
   def actions, do: %{"Inc" => StreamData.constant(%{})}
 
@@ -195,9 +195,9 @@ defmodule Outlaw.Fixtures.CounterSlowSpec do
   def project(pid), do: %{"x" => Agent.get(pid, & &1)}
 end
 
-defmodule Outlaw.Fixtures.CounterUnknownActionSpec do
+defmodule Notary.Fixtures.CounterUnknownActionSpec do
   @moduledoc false
-  use Outlaw.Conformance,
+  use Notary.Conformance,
     spec: "test/fixtures/specs/Counter.tla",
     observe: ["x", "nope"],
     discover: false
@@ -208,25 +208,25 @@ defmodule Outlaw.Fixtures.CounterUnknownActionSpec do
   def project(pid), do: %{"x" => Agent.get(pid, & &1)}
 end
 
-defmodule Outlaw.Fixtures.CounterUniformSpec do
+defmodule Notary.Fixtures.CounterUniformSpec do
   @moduledoc false
   # Same as CounterSpec, but keeps the Phase 1 uniform generator.
-  use Outlaw.Conformance,
+  use Notary.Conformance,
     spec: "test/fixtures/specs/Counter.tla",
     generation: :uniform,
     discover: false
 
-  defdelegate init(), to: Outlaw.Fixtures.CounterSpec
-  defdelegate actions(), to: Outlaw.Fixtures.CounterSpec
-  defdelegate action(name, params, pid), to: Outlaw.Fixtures.CounterSpec
-  defdelegate project(pid), to: Outlaw.Fixtures.CounterSpec
-  defdelegate teardown(pid), to: Outlaw.Fixtures.CounterSpec
+  defdelegate init(), to: Notary.Fixtures.CounterSpec
+  defdelegate actions(), to: Notary.Fixtures.CounterSpec
+  defdelegate action(name, params, pid), to: Notary.Fixtures.CounterSpec
+  defdelegate project(pid), to: Notary.Fixtures.CounterSpec
+  defdelegate teardown(pid), to: Notary.Fixtures.CounterSpec
 end
 
-defmodule Outlaw.Fixtures.CounterNotOfferedSpec do
+defmodule Notary.Fixtures.CounterNotOfferedSpec do
   @moduledoc false
   # Bug: the "UI" never offers Inc, although the spec allows it below Max.
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+  use Notary.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
 
   def init, do: Agent.start_link(fn -> 0 end)
   def actions, do: %{"Inc" => StreamData.constant(%{}), "Reset" => StreamData.constant(%{})}
@@ -240,16 +240,16 @@ defmodule Outlaw.Fixtures.CounterNotOfferedSpec do
   def project(pid), do: %{"x" => Agent.get(pid, & &1)}
 end
 
-defmodule Outlaw.Fixtures.CounterBadGenerationSpec do
+defmodule Notary.Fixtures.CounterBadGenerationSpec do
   @moduledoc false
   # Invalid mapping: generation: must be :walk or :uniform.
-  use Outlaw.Conformance,
+  use Notary.Conformance,
     spec: "test/fixtures/specs/Counter.tla",
     generation: :nope,
     discover: false
 
-  defdelegate init(), to: Outlaw.Fixtures.CounterSpec
-  defdelegate actions(), to: Outlaw.Fixtures.CounterSpec
-  defdelegate action(name, params, pid), to: Outlaw.Fixtures.CounterSpec
-  defdelegate project(pid), to: Outlaw.Fixtures.CounterSpec
+  defdelegate init(), to: Notary.Fixtures.CounterSpec
+  defdelegate actions(), to: Notary.Fixtures.CounterSpec
+  defdelegate action(name, params, pid), to: Notary.Fixtures.CounterSpec
+  defdelegate project(pid), to: Notary.Fixtures.CounterSpec
 end

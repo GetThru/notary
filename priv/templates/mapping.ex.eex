@@ -3,9 +3,9 @@ defmodule <%= @module %> do
   Conformance mapping between <%= @spec_path %> and the implementation.
 
   Written by the implementer (human or LLM) and reviewed by the spec author.
-  See `Outlaw.Conformance` for the callbacks.
+  See `Notary.Conformance` for the callbacks.
   """
-  use Outlaw.Conformance, spec: "<%= @spec_path %>"
+  use Notary.Conformance, spec: "<%= @spec_path %>"
 
   @impl true
   def init do
@@ -14,7 +14,7 @@ defmodule <%= @module %> do
     raise "implement init/0 for <%= @name %>"
   end
 
-  # Driving a LiveView? import Outlaw.Conformance.LiveView and use:
+  # Driving a LiveView? import Notary.Conformance.LiveView and use:
   #   def init, do: mount(MyAppWeb.SomeLive, endpoint: MyAppWeb.Endpoint)
   #   def action("Pay", _, ctx), do: click(ctx, "#pay")
   #   def project(ctx), do: %{"var" => text(ctx, "#some-id")}

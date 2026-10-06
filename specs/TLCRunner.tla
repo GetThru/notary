@@ -1,5 +1,5 @@
 ----------------------------- MODULE TLCRunner -----------------------------
-\* Outlaw.Tools.TLCRunner: runs one TLC model check as an OS process.
+\* Notary.Tools.TLCRunner: runs one TLC model check as an OS process.
 \*
 \* Each run has its own runner process (not linked to the caller) that owns
 \* the TLC port: it reads TLC's output, enforces the state limit and the

@@ -1,4 +1,4 @@
-defmodule Outlaw.Fixtures.Web.AsyncLive do
+defmodule Notary.Fixtures.Web.AsyncLive do
   @moduledoc false
   use Phoenix.LiveView, log: false
 

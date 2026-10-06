@@ -1,9 +1,9 @@
-defmodule Outlaw.Fixtures.AsyncJob do
+defmodule Notary.Fixtures.AsyncJob do
   @moduledoc false
   # A job that completes asynchronously: `request/1` replies immediately and
   # moves to :pending, then a few milliseconds later (via `handle_info`, not
   # the caller) moves on to :done on its own — an internal/reactive action the
-  # mapping cannot invoke directly (Outlaw spec §4.3).
+  # mapping cannot invoke directly (Notary spec §4.3).
   use GenServer
 
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts)

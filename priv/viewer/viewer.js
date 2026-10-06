@@ -1,6 +1,6 @@
 (function () {
   "use strict";
-  const data = JSON.parse(document.getElementById("outlaw-data").textContent);
+  const data = JSON.parse(document.getElementById("notary-data").textContent);
   const BIG = 500;
   const varNames = Array.from(new Set(data.nodes.flatMap((n) => Object.keys(n.vars)))).sort();
   const actions = Array.from(new Set(data.edges.map((e) => e.action))).sort();

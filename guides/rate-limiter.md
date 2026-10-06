@@ -13,7 +13,7 @@ Compared to Hello, World, it adds three ideas:
    time; time just passes. The spec models it as an action, and the mapping
    drives it with a fake clock.
 3. **Rejections as the main behaviour.** Most interesting steps are requests
-   the limiter must refuse, and Outlaw checks every refusal.
+   the limiter must refuse, and Notary checks every refusal.
 
 ## 1. Set up the project
 
@@ -22,18 +22,18 @@ $ mix new rate_limiter
 $ cd rate_limiter
 ```
 
-Add Outlaw to `mix.exs` exactly as in Getting Started (the dependency, the
-`elixirc_paths` for `test/outlaw`, and the `preferred_envs` in `cli/0`), then:
+Add Notary to `mix.exs` exactly as in Getting Started (the dependency, the
+`elixirc_paths` for `test/notary`, and the `preferred_envs` in `cli/0`), then:
 
 ```console
 $ mix deps.get
-$ mix outlaw.install
-$ mix outlaw.new Limiter
+$ mix notary.install
+$ mix notary.new Limiter
 * creating specs/Limiter.tla
 * creating specs/Limiter.cfg
 * creating specs/AGENTS.md
-* creating test/outlaw/limiter_spec.ex
-* creating test/outlaw/limiter_conformance_test.exs
+* creating test/notary/limiter_spec.ex
+* creating test/notary/limiter_conformance_test.exs
 ```
 
 ## 2. Write the spec
@@ -92,18 +92,18 @@ TLC explores every state of this model, so keep constants small. A limit of
 instead of a thousand.
 
 ```console
-$ mix outlaw.check Limiter
+$ mix notary.check Limiter
 Limiter: pass
   check: pass (4 distinct states)
 
-Outlaw: all checks passed.
-$ mix outlaw.lock
-Locked 2 spec files in specs/.outlaw.lock:
+Notary: all checks passed.
+$ mix notary.lock
+Locked 2 spec files in specs/.notary.lock:
   Limiter.cfg
   Limiter.tla
 ```
 
-Here is the whole state space, from `mix outlaw.graph Limiter --format
+Here is the whole state space, from `mix notary.graph Limiter --format
 mermaid`. Every state can `Tick` back to `count = 0`, and `Request` climbs
 until the limit, where it stops:
 
@@ -130,8 +130,8 @@ implementation stays testable:
 
 > Implement `specs/Limiter.tla` as `RateLimiter.Limiter`. Read
 > `specs/AGENTS.md` first. **Take the clock as an option** so tests can
-> control time. Complete `test/outlaw/limiter_spec.ex`, then run
-> `mix outlaw.verify --json` until it passes. Don't edit `specs/`.
+> control time. Complete `test/notary/limiter_spec.ex`, then run
+> `mix notary.verify --json` until it passes. Don't edit `specs/`.
 
 **The implementation**, `lib/rate_limiter/limiter.ex`:
 
@@ -192,11 +192,11 @@ Notice that nothing in this code is called "tick". The implementation only
 ever asks the clock what time it is. The spec's `Tick` is something that
 happens *to* the code.
 
-**The mapping module**, `test/outlaw/limiter_spec.ex`:
+**The mapping module**, `test/notary/limiter_spec.ex`:
 
 ```elixir
 defmodule RateLimiter.Specs.Limiter do
-  use Outlaw.Conformance, spec: "specs/Limiter.tla"
+  use Notary.Conformance, spec: "specs/Limiter.tla"
 
   alias RateLimiter.Limiter
 
@@ -261,7 +261,7 @@ Two smaller points:
 ## 4. Verify
 
 ```console
-$ mix outlaw.verify
+$ mix notary.verify
 lock: pass
 
 Limiter: pass
@@ -269,12 +269,12 @@ Limiter: pass
   conformance: pass (100 runs, seed 157098)
     coverage: actions 2/2, observed states 4/4, transitions 7/7
 
-Outlaw: all checks passed.
+Notary: all checks passed.
 ```
 
 The coverage line shows the runs reached both actions and all four states.
 They also took all seven transitions in the graph above, including the
-`Tick` self-loop at `count = 0`. Outlaw steers its runs toward transitions
+`Tick` self-loop at `count = 0`. Notary steers its runs toward transitions
 in the spec's graph, which is why the limit itself (`count = 3`, where
 `Request` must be refused) gets reached rather than left to luck. If a
 check ever misses part of the graph, the coverage line says so with a
@@ -286,7 +286,7 @@ check ever misses part of the graph, the coverage line says so with a
 `if state.count <= state.limit do`:
 
 ```console
-$ mix outlaw.verify
+$ mix notary.verify
 lock: pass
 
 Limiter: FAIL
@@ -319,15 +319,15 @@ Limiter: FAIL
     Spec allowed: (no Request transition is enabled here)
     minimized: 13 replays, 3 items removed, 0 params reduced
 
-    Reproduce: mix outlaw.test Limiter --seed 480105
-    Visualize: mix outlaw.graph Limiter --trace failure --open
+    Reproduce: mix notary.test Limiter --seed 480105
+    Visualize: mix notary.graph Limiter --trace failure --open
 
-Outlaw: verification FAILED.
+Notary: verification FAILED.
 ```
 
 The diagnostic points at the guard the fourth request violated, and the
 step table is the shortest failing run: four requests in a row. The
-`minimized:` line says Outlaw removed three steps from the run that first
+`minimized:` line says Notary removed three steps from the run that first
 failed (which also had some `Tick`s in it) to get there.
 
 **A window that doesn't reset.** Put the check back, and instead forget to
@@ -338,7 +338,7 @@ do: %{state | window_start: now},
 ```
 
 ```console
-$ mix outlaw.verify
+$ mix notary.verify
 lock: pass
 
 Limiter: FAIL
@@ -369,10 +369,10 @@ Limiter: FAIL
     Spec allowed: count = 0
     minimized: 6 replays, 2 items removed, 0 params reduced
 
-    Reproduce: mix outlaw.test Limiter --seed 931417
-    Visualize: mix outlaw.graph Limiter --trace failure --open
+    Reproduce: mix notary.test Limiter --seed 931417
+    Visualize: mix notary.graph Limiter --trace failure --open
 
-Outlaw: verification FAILED.
+Notary: verification FAILED.
 ```
 
 This is a different kind of failure. The action was allowed, so nothing was
@@ -380,7 +380,7 @@ wrong with *when* it ran; the problem is where it landed. After a window
 passes, the spec says `count' = 0`, but the implementation still reports
 `count = 1`. Two steps reproduce it: one request, then a tick.
 
-Restore the reset, and `mix outlaw.verify` passes again.
+Restore the reset, and `mix notary.verify` passes again.
 
 ## What you've learned
 

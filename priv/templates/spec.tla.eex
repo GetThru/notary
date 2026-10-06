@@ -1,12 +1,12 @@
 ---------------------------- MODULE <%= @name %> ----------------------------
 \* <%= @name %>: describe the feature this spec models.
 \*
-\* Outlaw conventions
+\* Notary conventions
 \*  - Each disjunct of Next is an action the implementation can be asked to
 \*    perform. Its name is the action name used in the mapping module.
 \*  - Model the outside world (time passing, an external service failing) as
 \*    actions too, e.g. GatewayDown. The mapping drives a stub for them.
-\*  - Keep CONSTANTS small in <%= @name %>.cfg: Outlaw explores every reachable
+\*  - Keep CONSTANTS small in <%= @name %>.cfg: Notary explores every reachable
 \*    state and checks the implementation against all of them.
 \*  - Variables the implementation cannot expose can be left out of the
 \*    mapping's `observe:` list.

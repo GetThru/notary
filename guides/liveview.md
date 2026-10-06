@@ -2,7 +2,7 @@
 
 This guide verifies a Phoenix LiveView against a spec. It assumes you've
 worked through [Getting Started: Hello, World](getting-started.md), so
-project setup, `mix outlaw.new`, and the overall workflow are only sketched
+project setup, `mix notary.new`, and the overall workflow are only sketched
 here. What's new is **driving a LiveView** instead of calling functions
 directly.
 
@@ -13,7 +13,7 @@ conformance adds over ordinary mappings: checking not just what your code
 
 ## 1. What you get
 
-`Outlaw.Conformance.LiveView` is a set of helpers on the mapping module you
+`Notary.Conformance.LiveView` is a set of helpers on the mapping module you
 already know from Getting Started — not a separate runner, not a declarative
 action table. Importing it gets you two rules, both enforced automatically:
 
@@ -33,12 +33,12 @@ If you're in a Phoenix 1.8+ app, most of this is already true:
 - `{:phoenix_live_view, "~> 1.2"}` is already a dependency.
 - `{:lazy_html, ...}`, scoped to `:test`, is already a dependency — Phoenix
   1.8's generators add it for `LiveViewTest`'s `has_element?/2` and friends,
-  which Outlaw's LiveView helpers also use.
+  which Notary's LiveView helpers also use.
 
 One thing to add, in `config/test.exs`:
 
 ```elixir
-config :outlaw, endpoint: MyAppWeb.Endpoint
+config :notary, endpoint: MyAppWeb.Endpoint
 ```
 
 `mount/2` needs an endpoint to build a connection against. Setting it once in
@@ -46,17 +46,17 @@ config means your mapping's `init/0` doesn't have to pass `endpoint:` on
 every call (you still can, to override it).
 
 The helpers exist only when both `phoenix_live_view` and `lazy_html` are
-available in the environment Outlaw is compiled in (usually `:test`).
-Otherwise `Outlaw.Conformance.LiveView` is never defined, and a mapping that
-imports it fails with "module Outlaw.Conformance.LiveView is not available".
+available in the environment Notary is compiled in (usually `:test`).
+Otherwise `Notary.Conformance.LiveView` is never defined, and a mapping that
+imports it fails with "module Notary.Conformance.LiveView is not available".
 
-Nothing in your application's own templates needs to depend on Outlaw: see
-"Observing the page" below — Outlaw reads your normal, visible markup.
+Nothing in your application's own templates needs to depend on Notary: see
+"Observing the page" below — Notary reads your normal, visible markup.
 
 ## 3. The spec
 
 `specs/Wizard.tla`, exactly as reviewed and locked (see Getting Started for
-`mix outlaw.check` / `mix outlaw.lock`):
+`mix notary.check` / `mix notary.lock`):
 
 ```tla
 ---- MODULE Wizard ----
@@ -119,9 +119,9 @@ What each action means for the UI:
 
 ## 4. Observing the page
 
-Outlaw reads the LiveView's rendered HTML directly — the same markup a
+Notary reads the LiveView's rendered HTML directly — the same markup a
 browser would see — instead of asking the template to expose a parallel,
-test-only data format. `Outlaw.Conformance.LiveView` gives `project/1` a
+test-only data format. `Notary.Conformance.LiveView` gives `project/1` a
 small set of page-query helpers:
 
 | Helper | Returns | Selector rule |
@@ -216,8 +216,8 @@ And `MyAppWeb.Specs.Wizard`, the mapping module:
 
 ```elixir
 defmodule MyAppWeb.Specs.Wizard do
-  use Outlaw.Conformance, spec: "specs/Wizard.tla"
-  import Outlaw.Conformance.LiveView
+  use Notary.Conformance, spec: "specs/Wizard.tla"
+  import Notary.Conformance.LiveView
 
   @impl true
   def init, do: mount(MyAppWeb.WizardLive, endpoint: MyAppWeb.Endpoint)
@@ -265,7 +265,7 @@ A few things worth calling out:
   it with the given CSS selector — see "Observing the page" above.
 - **`teardown(ctx), do: unmount(ctx)` matters.** `mount/2` can be called
   outside an ExUnit test process (conformance runs happen in their own
-  process, and `mix outlaw.verify` doesn't start ExUnit at all), so it
+  process, and `mix notary.verify` doesn't start ExUnit at all), so it
   registers the calling process with ExUnit itself when needed. `unmount/1`
   cleans that up, and is safe to call more than once. Without it, the
   runner still stops the run's linked processes (the test supervisor and the
@@ -282,11 +282,11 @@ A few things worth calling out:
 ## 6. Running it
 
 ```console
-$ mix outlaw.check Wizard
+$ mix notary.check Wizard
 Wizard: pass
   check: pass (4 distinct states)
 
-Outlaw: all checks passed.
+Notary: all checks passed.
 ```
 
 Four states: `step = "address"` with `address` either `FALSE` or `TRUE`, then
@@ -296,13 +296,13 @@ TRUE`, since `Continue` requires it and nothing ever clears it before
 `step = "payment"`/`"done"` with `address = FALSE` are never reached.
 
 ```console
-$ mix outlaw.test Wizard --seed 1
+$ mix notary.test Wizard --seed 1
 Wizard: pass
   check: pass (4 distinct states)
   conformance: pass (100 runs, seed 1)
     coverage: actions 5/5, observed states 4/4, transitions 6/6
 
-Outlaw: all checks passed.
+Notary: all checks passed.
 ```
 
 All five actions, all four states, all six transitions in the graph — driven
@@ -320,7 +320,7 @@ address step is even done. `EnterAddress`, `Continue`, `Back`, `StartOver`
 are untouched; only `Pay`'s guard in the template is wrong.
 
 ```console
-$ mix outlaw.test Wizard --seed 1
+$ mix notary.test Wizard --seed 1
 Wizard: FAIL
   check: pass (4 distinct states)
   conformance: fail
@@ -351,10 +351,10 @@ Wizard: FAIL
     Spec allowed: (no Pay transition is enabled here)
     minimized: 3 replays, 1 items removed, 0 params reduced
     
-    Reproduce: mix outlaw.test Wizard --seed 1
-    Visualize: mix outlaw.graph Wizard --trace failure --open
+    Reproduce: mix notary.test Wizard --seed 1
+    Visualize: mix notary.graph Wizard --trace failure --open
 
-Outlaw: verification FAILED.
+Notary: verification FAILED.
 ```
 
 This is the ordinary `action_not_enabled` failure: the element was present
@@ -368,7 +368,7 @@ is caught on 10/10 seeds.
 entirely, or hardcoded to `false` — "Pay" just never renders, on any step.
 
 ```console
-$ mix outlaw.test Wizard --seed 1
+$ mix notary.test Wizard --seed 1
 Wizard: FAIL
   check: pass (4 distinct states)
   conformance: fail
@@ -402,10 +402,10 @@ Wizard: FAIL
     minimized: 3 replays, 0 items removed, 0 params reduced
     selector: #pay
     
-    Reproduce: mix outlaw.test Wizard --seed 1
-    Visualize: mix outlaw.graph Wizard --trace failure --open
+    Reproduce: mix notary.test Wizard --seed 1
+    Visualize: mix notary.graph Wizard --trace failure --open
 
-Outlaw: verification FAILED.
+Notary: verification FAILED.
 ```
 
 This is the new rule: `click(ctx, "#pay")` correctly reported
@@ -454,4 +454,4 @@ missing element. Measured the same way, this bug is caught on 10/10 seeds.
   modeling time as an external action — ideas that apply to LiveView mappings
   just as much as function-level ones.
 - See the README's "LiveView" section for the measured catch rates above, and
-  `Outlaw.Conformance.LiveView` for the full function reference.
+  `Notary.Conformance.LiveView` for the full function reference.

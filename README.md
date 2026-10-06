@@ -1,14 +1,14 @@
-# Outlaw
+# Notary
 
-> Any behavior not in the spec is outlawed.
+> Any behavior not in the spec is uncertified.
 
-Outlaw makes **TLA+ specifications the contract between you and an LLM** in
+Notary makes **TLA+ specifications the contract between you and an LLM** in
 Elixir projects. You write the spec. TLC model-checks it. The LLM implements it.
-Outlaw then proves the implementation behaves like the spec, by driving it
+Notary then proves the implementation behaves like the spec, by driving it
 through generated action sequences and checking every step against the spec's
 full state graph.
 
-New to Outlaw? Start with the
+New to Notary? Start with the
 [Getting Started: Hello, World](guides/getting-started.md) guide, which goes
 from `mix new` to a verified feature in a few minutes.
 
@@ -20,40 +20,40 @@ def project do
   [..., elixirc_paths: elixirc_paths(Mix.env())]
 end
 
-def cli, do: [preferred_envs: ["outlaw.test": :test, "outlaw.verify": :test]]
+def cli, do: [preferred_envs: ["notary.test": :test, "notary.verify": :test]]
 
-defp deps, do: [{:outlaw, "~> 0.1", only: [:dev, :test]}]
-defp elixirc_paths(:test), do: ["lib", "test/support", "test/outlaw"]
+defp deps, do: [{:notary, "~> 0.1", only: [:dev, :test]}]
+defp elixirc_paths(:test), do: ["lib", "test/support", "test/notary"]
 defp elixirc_paths(_), do: ["lib"]
 ```
 
 ```bash
 mix deps.get
-mix outlaw.install      # pinned tla2tools.jar; needs Java >= 11
+mix notary.install      # pinned tla2tools.jar; needs Java >= 11
 ```
 
 Using Nix? See [Using Nix](#using-nix): the flake provides Java and the jar,
-so you can skip `mix outlaw.install`.
+so you can skip `mix notary.install`.
 
 ### Using Nix
 
-Outlaw needs two things a normal Elixir setup doesn't have: **Java** (11 or
+Notary needs two things a normal Elixir setup doesn't have: **Java** (11 or
 newer) and the pinned **TLA+ tools jar**. The flake in this repository
 provides both:
 
 - **`packages.tla2tools`** is the pinned jar, fetched and checksum-verified
   by nix.
-- **`devShells.tools`** adds Java and exports `OUTLAW_TLA2TOOLS`, pointing
+- **`devShells.tools`** adds Java and exports `NOTARY_TLA2TOOLS`, pointing
   at that jar. It contains nothing else, so it layers onto whatever Elixir
   you already use.
 
-Outlaw finds the jar in this order: `config :outlaw, tla2tools_path:`, then
-the `OUTLAW_TLA2TOOLS` environment variable, then
-`_build/outlaw/tla2tools.jar` (where `mix outlaw.install` puts it). With the
-flake's shell active, `mix outlaw.install` has nothing to download; it just
+Notary finds the jar in this order: `config :notary, tla2tools_path:`, then
+the `NOTARY_TLA2TOOLS` environment variable, then
+`_build/notary/tla2tools.jar` (where `mix notary.install` puts it). With the
+flake's shell active, `mix notary.install` has nothing to download; it just
 confirms the jar and Java.
 
-**If your project has its own `flake.nix`**, add Outlaw as an input and pull
+**If your project has its own `flake.nix`**, add Notary as an input and pull
 its tools shell into yours:
 
 ```nix
@@ -61,16 +61,16 @@ its tools shell into yours:
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    outlaw.url = "git+file:///path/to/outlaw";  # until Outlaw has a public repo
+    notary.url = "git+file:///path/to/notary";  # until Notary has a public repo
   };
 
-  outputs = { nixpkgs, flake-utils, outlaw, ... }:
+  outputs = { nixpkgs, flake-utils, notary, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let pkgs = import nixpkgs { inherit system; };
       in {
         devShells.default = pkgs.mkShell {
-          # Java and the TLA+ tools jar for Outlaw.
-          inputsFrom = [ outlaw.devShells.${system}.tools ];
+          # Java and the TLA+ tools jar for Notary.
+          inputsFrom = [ notary.devShells.${system}.tools ];
           # Your project's own toolchain.
           packages = [ pkgs.beam.packages.erlang_27.elixir_1_19 ];
         };
@@ -78,37 +78,37 @@ its tools shell into yours:
 }
 ```
 
-Then `nix develop` and use `mix outlaw.*` as usual.
+Then `nix develop` and use `mix notary.*` as usual.
 
 **If it doesn't**, borrow the tools shell for a session, from your project
 directory. Elixir comes from wherever you normally get it:
 
 ```console
-$ nix develop /path/to/outlaw#tools
-$ mix outlaw.verify
+$ nix develop /path/to/notary#tools
+$ mix notary.verify
 ```
 
-Or for a single command: `nix develop /path/to/outlaw#tools -c mix outlaw.verify`.
+Or for a single command: `nix develop /path/to/notary#tools -c mix notary.verify`.
 
 Don't use the flake's *default* shell for your project. That shell is for
-working on Outlaw itself: it pins Elixir 1.19 and points `MIX_HOME` and
+working on Notary itself: it pins Elixir 1.19 and points `MIX_HOME` and
 `HEX_HOME` at folders in the current directory.
 
 ## Workflow
 
 | Who | Step |
 |---|---|
-| You | `mix outlaw.new Checkout`, then write `specs/Checkout.tla` and `.cfg` |
-| You | `mix outlaw.check Checkout` until TLC is happy, then `mix outlaw.lock` |
-| LLM | Implement it in `lib/`, and complete `test/outlaw/checkout_spec.ex` |
-| LLM / CI | `mix outlaw.verify --json` (lock check, model check, conformance) |
+| You | `mix notary.new Checkout`, then write `specs/Checkout.tla` and `.cfg` |
+| You | `mix notary.check Checkout` until TLC is happy, then `mix notary.lock` |
+| LLM | Implement it in `lib/`, and complete `test/notary/checkout_spec.ex` |
+| LLM / CI | `mix notary.verify --json` (lock check, model check, conformance) |
 
 `specs/AGENTS.md` tells agents the rules: specs are yours, and agents never
-edit them. If a spec changes without `mix outlaw.lock`, verification fails.
+edit them. If a spec changes without `mix notary.lock`, verification fails.
 
 A conformance failure or error renders as a compiler-style diagnostic first
 (a source excerpt with the responsible span underlined, then `help:`/`note:`
-lines) whenever Outlaw can locate it in the spec or mapping file, followed by
+lines) whenever Notary can locate it in the spec or mapping file, followed by
 the full step table. `--json` carries the same position as
 `"location": {"file", "line", "column"}` on the `failure`/`error` object, so
 an agent (or an editor) can jump straight there.
@@ -117,7 +117,7 @@ an agent (or an editor) can jump straight there.
 
 ```elixir
 defmodule MyApp.Specs.Bank do
-  use Outlaw.Conformance, spec: "specs/Bank.tla", observe: ["balance"]
+  use Notary.Conformance, spec: "specs/Bank.tla", observe: ["balance"]
 
   def init, do: MyApp.Bank.start_link()
   def actions, do: %{"Deposit" => StreamData.fixed_map(%{a: StreamData.integer(1..2)}), ...}
@@ -126,12 +126,12 @@ defmodule MyApp.Specs.Bank do
 end
 ```
 
-- `project/1` returns spec variables using `Outlaw.Value`'s representation:
+- `project/1` returns spec variables using `Notary.Value`'s representation:
   model values are `model("u1")`, sets are `set([...])`, sequences are lists,
   records are maps with string keys.
 - Actions that the spec forbids must return `{:rejected, reason, ctx}` with
   state unchanged except for internal reactions (see `internal:` below).
-  Outlaw checks guards too.
+  Notary checks guards too.
 - Model the outside world (time, failing services) as spec actions, and have
   the mapping drive a stub.
 
@@ -143,7 +143,7 @@ a limit check killing a run. The mapping can't invoke these, and checking
 state right after the triggering step would race the reaction.
 
 ```elixir
-use Outlaw.Conformance, spec: "specs/Watchdog.tla", internal: ["Reap"]
+use Notary.Conformance, spec: "specs/Watchdog.tla", internal: ["Reap"]
 ```
 
 Internal actions are excluded from `actions/0` (and must not be a key of it):
@@ -159,7 +159,7 @@ is never required to fire.
 
 ### Generation
 
-By default (`generation: :walk`), sequences come from `Outlaw.Conformance.Walk`,
+By default (`generation: :walk`), sequences come from `Notary.Conformance.Walk`,
 which walks the spec's state graph: about half of the generated values target
 a graph edge directly (shortest path to it, then that transition); every value
 then continues with mostly actions enabled somewhere in the current possible
@@ -169,7 +169,7 @@ instead — uniform random picks from `actions/0`, no targeting, no `:settle`
 points:
 
 ```elixir
-use Outlaw.Conformance, spec: "specs/Bank.tla", generation: :uniform
+use Notary.Conformance, spec: "specs/Bank.tla", generation: :uniform
 ```
 
 `:uniform` is useful as a baseline when comparing behavior, or while
@@ -177,13 +177,13 @@ narrowing down whether a failure is particular to the walk's targeting.
 
 ### LiveView
 
-`Outlaw.Conformance.LiveView` adds helpers for mapping modules that drive a
+`Notary.Conformance.LiveView` adds helpers for mapping modules that drive a
 Phoenix LiveView instead of calling functions directly:
 
 ```elixir
 defmodule MyAppWeb.Specs.Wizard do
-  use Outlaw.Conformance, spec: "specs/Wizard.tla"
-  import Outlaw.Conformance.LiveView
+  use Notary.Conformance, spec: "specs/Wizard.tla"
+  import Notary.Conformance.LiveView
 
   def init, do: mount(MyAppWeb.WizardLive, endpoint: MyAppWeb.Endpoint)
   def action("Pay", _, ctx), do: click(ctx, "#pay")
@@ -202,8 +202,8 @@ Two rules are enforced: the UI must not offer what the spec forbids
 the spec allows (`action_not_offered` — a missing or disabled element where
 the spec says the action should be possible). Variables are read straight
 from the rendered page with page-query helpers (`text/2`, `has?/2`,
-`attr/3`, `value/2`, ...) — no Outlaw code or test-only markup in app
-templates, since Outlaw is a `:dev`/`:test` dependency. `assigns/1` is an
+`attr/3`, `value/2`, ...) — no Notary code or test-only markup in app
+templates, since Notary is a `:dev`/`:test` dependency. `assigns/1` is an
 escape hatch for state the page never shows. See the
 [LiveView guide](guides/liveview.md) for the full walkthrough.
 
@@ -216,9 +216,9 @@ allowed action is caught by `action_not_offered` on 10/10 seeds.
 ## Seeing the state space
 
 ```bash
-mix outlaw.graph Bank --open                      # interactive HTML
-mix outlaw.graph Bank --trace failure --open      # where the last conformance run diverged
-mix outlaw.graph Bank --format mermaid            # for PRs and LLMs
+mix notary.graph Bank --open                      # interactive HTML
+mix notary.graph Bank --trace failure --open      # where the last conformance run diverged
+mix notary.graph Bank --format mermaid            # for PRs and LLMs
 ```
 
 ## Limits (v1)
@@ -244,7 +244,7 @@ start reading, not a verdict.
 Every passing `check` reports a coverage summary (`coverage: actions R/T,
 observed states R/T, transitions R/T`) plus `warning:` lines for gaps — read
 them, don't just trust a pass. A gap can be genuine and permanent rather than
-bad luck: on Outlaw's own `specs/TLCRunner.tla`, a couple of the graph's
+bad luck: on Notary's own `specs/TLCRunner.tla`, a couple of the graph's
 states are reachable in TLC but never in the real implementation, because an
 internal reaction (the state-limit kill beating a driven `Cancel`/`Timeout`
 at the same instant) wins the timing race in every measured run — not a bug, just the
@@ -252,7 +252,7 @@ coverage report documenting exactly which graph states the implementation's
 real timing rules out.
 
 Random generation can also miss paths that *aren't* ruled out, just rare.
-Measured on `specs/TLCRunner.tla` (`mix outlaw.verify --seed 1..10`, default
+Measured on `specs/TLCRunner.tla` (`mix notary.verify --seed 1..10`, default
 100 runs, `generation: :walk`):
 
 - All 6 external actions plus both internal ones (`LimitKill`, `Reap`) are
@@ -280,17 +280,17 @@ Raise `--max-runs` for specs where a missed-but-possible path matters. It
 won't help an unfair internal action that silently stops firing: catching
 that needs a human decision (mark it fair in the spec, as was done for
 `LimitKill` here, or add a dedicated assertion), not more runs. `--seed`, `--max-runs` and `--json` are
-CLI options on `mix outlaw.verify`/`mix outlaw.test`; `settle_timeout` is not
-— it's set via `config :outlaw, settle_timeout: ...` — and `max_replays`
+CLI options on `mix notary.verify`/`mix notary.test`; `settle_timeout` is not
+— it's set via `config :notary, settle_timeout: ...` — and `max_replays`
 (the post-shrink minimization pass's replay budget) isn't exposed by any mix
-task at all, only as an opt to `Outlaw.Conformance.Runner.check/4` directly.
+task at all, only as an opt to `Notary.Conformance.Runner.check/4` directly.
 
-## Developing Outlaw
+## Developing Notary
 
 ```bash
 nix develop                            # Elixir, Java and the TLA+ jar (no install step)
 mix deps.get
 mix test --include tlc                 # add --include e2e for the end-to-end test
-mix outlaw.verify --max-runs 1000
+mix notary.verify --max-runs 1000
 mix run test/fixtures/regen_graphs.exs # after changing fixture specs
 ```

@@ -1,4 +1,4 @@
-defmodule Outlaw.E2ETest do
+defmodule Notary.E2ETest do
   use ExUnit.Case, async: false
 
   @moduletag :e2e
@@ -12,8 +12,8 @@ defmodule Outlaw.E2ETest do
     File.rm_rf!(Path.join(app, "deps"))
 
     env = [
-      {"OUTLAW_PATH", File.cwd!()},
-      {"OUTLAW_TLA2TOOLS", Outlaw.Config.jar_path()},
+      {"NOTARY_PATH", File.cwd!()},
+      {"NOTARY_TLA2TOOLS", Notary.Config.jar_path()},
       {"MIX_ENV", nil}
     ]
 
@@ -28,10 +28,10 @@ defmodule Outlaw.E2ETest do
   defp last_json(out), do: out |> String.split("\n", trim: true) |> List.last() |> JSON.decode!()
 
   test "the full human + LLM workflow in a consumer project", ctx do
-    {out, 0} = mix(ctx, ["outlaw.lock"])
+    {out, 0} = mix(ctx, ["notary.lock"])
     assert out =~ "Locked 2 spec files"
 
-    {out, 0} = mix(ctx, ["outlaw.verify", "--json"])
+    {out, 0} = mix(ctx, ["notary.verify", "--json"])
     assert %{"status" => "pass"} = last_json(out)
 
     {out, 0} = mix(ctx, ["test"])
@@ -42,24 +42,24 @@ defmodule Outlaw.E2ETest do
       Path.join(ctx.app, "lib/sample_app/counter.ex")
     )
 
-    {out, 1} = mix(ctx, ["outlaw.verify", "--json"])
+    {out, 1} = mix(ctx, ["notary.verify", "--json"])
     %{"specs" => [%{"stages" => [_, conf]}]} = last_json(out)
     assert conf["failure"]["kind"] == "action_not_enabled"
     assert length(conf["failure"]["steps"]) == 5
-    assert File.exists?(Path.join(ctx.app, "_build/outlaw/Counter-failure.html"))
+    assert File.exists?(Path.join(ctx.app, "_build/notary/Counter-failure.html"))
 
-    {out, 0} = mix(ctx, ["outlaw.graph", "Counter", "--trace", "failure", "--format", "mermaid"])
+    {out, 0} = mix(ctx, ["notary.graph", "Counter", "--trace", "failure", "--format", "mermaid"])
     assert out =~ "stateDiagram-v2"
 
     spec = Path.join(ctx.app, "specs/Counter.tla")
     File.write!(spec, File.read!(spec) <> "\n\\* an LLM was here\n")
-    {out, 1} = mix(ctx, ["outlaw.verify"])
+    {out, 1} = mix(ctx, ["notary.verify"])
     assert out =~ "changed: Counter.tla"
 
-    {out, 0} = mix(ctx, ["outlaw.new", "Thing"])
+    {out, 0} = mix(ctx, ["notary.new", "Thing"])
     assert out =~ "creating specs/Thing.tla"
     assert out =~ "creating specs/AGENTS.md"
-    {out, 0} = mix(ctx, ["outlaw.check", "Thing"])
+    {out, 0} = mix(ctx, ["notary.check", "Thing"])
     assert out =~ "Thing: pass"
   end
 end

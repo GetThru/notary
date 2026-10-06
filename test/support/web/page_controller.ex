@@ -1,4 +1,4 @@
-defmodule Outlaw.Fixtures.Web.PageController do
+defmodule Notary.Fixtures.Web.PageController do
   @moduledoc false
   use Phoenix.Controller, formats: [:html]
 

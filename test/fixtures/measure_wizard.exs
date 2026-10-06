@@ -1,17 +1,17 @@
 # Catch rates for the buggy wizards over seeds 1..10 at the default 100 runs.
 # Run: MIX_ENV=test mix run test/fixtures/measure_wizard.exs
-Outlaw.Fixtures.Web.start!()
-graph = Outlaw.Fixtures.graph("Wizard")
+Notary.Fixtures.Web.start!()
+graph = Notary.Fixtures.graph("Wizard")
 
 for {module, expected} <- [
-      {Outlaw.Fixtures.WizardEarlyPaySpec, :action_not_enabled},
-      {Outlaw.Fixtures.WizardNoPaySpec, :action_not_offered}
+      {Notary.Fixtures.WizardEarlyPaySpec, :action_not_enabled},
+      {Notary.Fixtures.WizardNoPaySpec, :action_not_offered}
     ] do
   caught =
     Enum.count(1..10, fn seed ->
       match?(
-        {:error, %Outlaw.Conformance.Failure{kind: ^expected}},
-        Outlaw.Conformance.check(module, graph, seed: seed, max_runs: 100)
+        {:error, %Notary.Conformance.Failure{kind: ^expected}},
+        Notary.Conformance.check(module, graph, seed: seed, max_runs: 100)
       )
     end)
 

@@ -1,4 +1,4 @@
-defmodule Outlaw.Fixtures.FakeGateway do
+defmodule Notary.Fixtures.FakeGateway do
   @moduledoc false
   use Agent
   def start_link, do: Agent.start_link(fn -> :up end)
@@ -7,10 +7,10 @@ defmodule Outlaw.Fixtures.FakeGateway do
   def charge(pid), do: if(status(pid) == :up, do: :ok, else: {:error, :gateway_down})
 end
 
-defmodule Outlaw.Fixtures.Orders do
+defmodule Notary.Fixtures.Orders do
   @moduledoc false
   use GenServer
-  alias Outlaw.Fixtures.FakeGateway
+  alias Notary.Fixtures.FakeGateway
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
   def pay(pid, user), do: GenServer.call(pid, {:pay, user})

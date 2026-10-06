@@ -1,4 +1,4 @@
-defmodule Outlaw.Specs.TLCRunner.FakeTLC do
+defmodule Notary.Specs.TLCRunner.FakeTLC do
   @moduledoc false
   # Helpers around test/support/fake_tlc.sh, a stand-in for `java` that the
   # test (or mapping) drives through a FIFO: see that script for the protocol.
@@ -84,9 +84,9 @@ defmodule Outlaw.Specs.TLCRunner.FakeTLC do
   end
 end
 
-defmodule Outlaw.Specs.TLCRunner do
+defmodule Notary.Specs.TLCRunner do
   @moduledoc false
-  # Conformance mapping for specs/TLCRunner.tla (human-authored): Outlaw
+  # Conformance mapping for specs/TLCRunner.tla (human-authored): Notary
   # verifying its own TLC runner. The OS process is test/support/fake_tlc.sh,
   # driven through a FIFO; the "caller" is a plain unlinked process that
   # starts the run, awaits it and records the result.
@@ -97,10 +97,10 @@ defmodule Outlaw.Specs.TLCRunner do
   #
   # Every guard is checked against the current projection before any side
   # effect, so a rejected action never changes anything.
-  use Outlaw.Conformance, spec: "specs/TLCRunner.tla", internal: ["LimitKill", "Reap"]
+  use Notary.Conformance, spec: "specs/TLCRunner.tla", internal: ["LimitKill", "Reap"]
 
-  alias Outlaw.Specs.TLCRunner.FakeTLC
-  alias Outlaw.Tools.TLCRunner
+  alias Notary.Specs.TLCRunner.FakeTLC
+  alias Notary.Tools.TLCRunner
 
   # Must match `CONSTANT Limit = 2` in specs/TLCRunner.cfg: TLC checks the
   # spec's `Limit` against this same value, so the two must stay in sync.
@@ -115,7 +115,7 @@ defmodule Outlaw.Specs.TLCRunner do
   def init do
     dir =
       Path.join([
-        Outlaw.Config.work_dir(),
+        Notary.Config.work_dir(),
         "tmp",
         "fake-tlc-#{System.unique_integer([:positive])}"
       ])

@@ -1,4 +1,4 @@
-defmodule Outlaw.Fixtures.Bank do
+defmodule Notary.Fixtures.Bank do
   @moduledoc false
   use Agent
 

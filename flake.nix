@@ -1,5 +1,5 @@
 {
-  description = "Outlaw: TLA+ specs as the contract for Elixir code";
+  description = "Notary: TLA+ specs as the contract for Elixir code";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -18,8 +18,8 @@
         pkgs = import nixpkgs { inherit system; };
         beam = pkgs.beam.packages.erlang_27;
 
-        # The TLA+ tools jar Outlaw pins (Outlaw.Config.tla_version/0 and
-        # jar_sha256/0). Keep this in sync with lib/outlaw/config.ex.
+        # The TLA+ tools jar Notary pins (Notary.Config.tla_version/0 and
+        # jar_sha256/0). Keep this in sync with lib/notary/config.ex.
         tla2tools = pkgs.stdenvNoCC.mkDerivation rec {
           pname = "tla2tools";
           version = "1.7.4";
@@ -33,26 +33,26 @@
           '';
         };
 
-        # What a project using Outlaw needs on top of its own Elixir: Java,
-        # and the jar (so `mix outlaw.install` is unnecessary). The variable
+        # What a project using Notary needs on top of its own Elixir: Java,
+        # and the jar (so `mix notary.install` is unnecessary). The variable
         # is exported from shellHook, not set as a mkShell attribute, because
         # `inputsFrom` merges shell hooks but not environment attributes.
         toolsPackages = [ pkgs.jdk21_headless ];
         toolsHook = ''
-          export OUTLAW_TLA2TOOLS=${tla2tools}/share/java/tla2tools.jar
+          export NOTARY_TLA2TOOLS=${tla2tools}/share/java/tla2tools.jar
         '';
       in
       {
         packages.tla2tools = tla2tools;
 
-        # For projects that use Outlaw: layer onto your own shell with
-        # `inputsFrom = [ outlaw.devShells.${system}.tools ];`.
+        # For projects that use Notary: layer onto your own shell with
+        # `inputsFrom = [ notary.devShells.${system}.tools ];`.
         devShells.tools = pkgs.mkShell {
           packages = toolsPackages;
           shellHook = toolsHook;
         };
 
-        # For working on Outlaw itself.
+        # For working on Notary itself.
         devShells.default = pkgs.mkShell {
           packages = [
             beam.erlang

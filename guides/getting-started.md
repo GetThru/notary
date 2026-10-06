@@ -2,15 +2,15 @@
 
 This guide takes you from an empty directory to a verified feature. You will:
 
-1. create a Mix project and add Outlaw,
+1. create a Mix project and add Notary,
 2. write a small TLA+ spec for a feature,
 3. have the feature implemented (by an LLM agent, or by hand),
 4. verify the implementation against the spec,
-5. break it on purpose and read what Outlaw reports.
+5. break it on purpose and read what Notary reports.
 
 The feature is about as small as features get: a **greeter that prints
 `Hello, world!` exactly once**. Asking it to greet a second time must be
-refused. That's tiny, but it already has the two things Outlaw checks: a
+refused. That's tiny, but it already has the two things Notary checks: a
 change of state (not greeted → greeted) and a rule about when an action is
 allowed (only before the first greeting).
 
@@ -20,12 +20,12 @@ You need:
 
 - Elixir 1.19 or newer.
 - Java 11 or newer, to run the TLA+ model checker (TLC). Check with
-  `java -version`. If you use Nix, Outlaw's flake can provide Java and the
+  `java -version`. If you use Nix, Notary's flake can provide Java and the
   TLA+ tools jar for you: see "Using Nix" in the README. Then you can skip
-  `mix outlaw.install` in step 2.
-- A local copy of Outlaw. It isn't published to Hex yet, so this guide
+  `mix notary.install` in step 2.
+- A local copy of Notary. It isn't published to Hex yet, so this guide
   depends on it by path. The examples assume it lives next to your project,
-  at `../outlaw`.
+  at `../notary`.
 
 You don't need to know TLA+ already. Everything the spec uses is explained
 as it comes up.
@@ -33,70 +33,70 @@ as it comes up.
 ## 1. Create the project
 
 ```console
-$ mix new hello_outlaw
-$ cd hello_outlaw
+$ mix new hello_notary
+$ cd hello_notary
 ```
 
-## 2. Add Outlaw
+## 2. Add Notary
 
 Open `mix.exs` and make three changes:
 
 ```elixir
-defmodule HelloOutlaw.MixProject do
+defmodule HelloNotary.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :hello_outlaw,
+      app: :hello_notary,
       version: "0.1.0",
       elixir: "~> 1.19",
-      # 1. Compile the mapping modules under test/outlaw in the test env.
+      # 1. Compile the mapping modules under test/notary in the test env.
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps()
     ]
   end
 
-  # 2. Run Outlaw's conformance tasks in the test environment.
+  # 2. Run Notary's conformance tasks in the test environment.
   def cli do
-    [preferred_envs: ["outlaw.test": :test, "outlaw.verify": :test]]
+    [preferred_envs: ["notary.test": :test, "notary.verify": :test]]
   end
 
   def application do
     [extra_applications: [:logger]]
   end
 
-  defp elixirc_paths(:test), do: ["lib", "test/support", "test/outlaw"]
+  defp elixirc_paths(:test), do: ["lib", "test/support", "test/notary"]
   defp elixirc_paths(_), do: ["lib"]
 
   defp deps do
     [
-      # 3. Outlaw itself, only needed in dev and test.
-      {:outlaw, path: "../outlaw", only: [:dev, :test]}
+      # 3. Notary itself, only needed in dev and test.
+      {:notary, path: "../notary", only: [:dev, :test]}
     ]
   end
 end
 ```
 
-Then fetch dependencies and install the TLA+ tools. `mix outlaw.install`
+Then fetch dependencies and install the TLA+ tools. `mix notary.install`
 downloads the pinned `tla2tools.jar`, checks its checksum, and checks Java:
 
 ```console
 $ mix deps.get
-$ mix outlaw.install
-tla2tools.jar v1.7.4 ready at _build/outlaw/tla2tools.jar
+$ mix notary.install
+tla2tools.jar v1.7.4 ready at _build/notary/tla2tools.jar
 Java OK: /usr/bin/java
 ```
 
 ## 3. Scaffold the spec
 
 ```console
-$ mix outlaw.new Greeter
+$ mix notary.new Greeter
 * creating specs/Greeter.tla
 * creating specs/Greeter.cfg
 * creating specs/AGENTS.md
-* creating test/outlaw/greeter_spec.ex
-* creating test/outlaw/greeter_conformance_test.exs
+* creating test/notary/greeter_spec.ex
+* creating test/notary/greeter_conformance_test.exs
 ```
 
 What each file is for:
@@ -106,10 +106,10 @@ What each file is for:
 | `specs/Greeter.tla` | **you** | The TLA+ spec: what the feature is allowed to do. |
 | `specs/Greeter.cfg` | **you** | The model TLC checks (constants, invariants). |
 | `specs/AGENTS.md` | generated once | Rules for LLM agents: never edit specs, how to verify. |
-| `test/outlaw/greeter_spec.ex` | the implementer | The *mapping module* that connects the spec to your code. |
-| `test/outlaw/greeter_conformance_test.exs` | generated | Runs the conformance check as part of `mix test`. |
+| `test/notary/greeter_spec.ex` | the implementer | The *mapping module* that connects the spec to your code. |
+| `test/notary/greeter_conformance_test.exs` | generated | Runs the conformance check as part of `mix test`. |
 
-`mix outlaw.new` also prints a snippet for your `CLAUDE.md` or `AGENTS.md`,
+`mix notary.new` also prints a snippet for your `CLAUDE.md` or `AGENTS.md`,
 so that agents working in your project find `specs/AGENTS.md`. Add it if you
 use an agent.
 
@@ -168,26 +168,26 @@ Now let TLC check the spec. It explores every reachable state and checks
 `TypeOK` in each:
 
 ```console
-$ mix outlaw.check Greeter
+$ mix notary.check Greeter
 Greeter: pass
   check: pass (2 distinct states)
 
-Outlaw: all checks passed.
+Notary: all checks passed.
 ```
 
 Two states: not greeted, and greeted. When you're happy with the spec,
 record it as reviewed:
 
 ```console
-$ mix outlaw.lock
-Locked 2 spec files in specs/.outlaw.lock:
+$ mix notary.lock
+Locked 2 spec files in specs/.notary.lock:
   Greeter.cfg
   Greeter.tla
 ```
 
 The lock file is your signature. From now on, if anyone (an LLM agent
-included) changes a spec file without you running `mix outlaw.lock` again,
-`mix outlaw.verify` fails. Commit the lock file along with your specs.
+included) changes a spec file without you running `mix notary.lock` again,
+`mix notary.verify` fails. Commit the lock file along with your specs.
 
 ## 5. Get it implemented
 
@@ -195,30 +195,30 @@ This is where an LLM agent comes in. The spec is the whole requirement; you
 don't need to describe the feature again in prose. A prompt like this is
 enough:
 
-> Implement the spec in `specs/Greeter.tla` as `HelloOutlaw.Greeter` in
+> Implement the spec in `specs/Greeter.tla` as `HelloNotary.Greeter` in
 > `lib/`. Read `specs/AGENTS.md` first. Complete the mapping module in
-> `test/outlaw/greeter_spec.ex`, then run `mix outlaw.verify --json` and fix
+> `test/notary/greeter_spec.ex`, then run `mix notary.verify --json` and fix
 > the code until it passes. Don't edit anything in `specs/`.
 
-If you run `mix outlaw.verify` before anything is implemented, it already
+If you run `mix notary.verify` before anything is implemented, it already
 tells you (and the agent) what's missing. Here, the scaffold's placeholder
 actions don't exist in the new spec:
 
 ```console
-$ mix outlaw.verify
+$ mix notary.verify
 lock: pass
 
 Greeter: FAIL
   check: pass (2 distinct states)
   conformance: error
-    error[invalid_mapping]: Invalid mapping HelloOutlaw.Specs.Greeter
-       ╭─[test/outlaw/greeter_spec.ex:8:3]
+    error[invalid_mapping]: Invalid mapping HelloNotary.Specs.Greeter
+       ╭─[test/notary/greeter_spec.ex:8:3]
        │
-     6 │   See `Outlaw.Conformance` for the callbacks.
+     6 │   See `Notary.Conformance` for the callbacks.
      7 │   """
-     8 │   use Outlaw.Conformance, spec: "specs/Greeter.tla"
+     8 │   use Notary.Conformance, spec: "specs/Greeter.tla"
        •   ────────────────────────┬────────────────────────
-       •                           ╰── use Outlaw.Conformance here
+       •                           ╰── use Notary.Conformance here
      9 │ 
     10 │   @impl true
        ⋮
@@ -233,24 +233,24 @@ Greeter: FAIL
        ╰─────
          help: actions/0 names actions that never occur in the spec's state graph: Increment, Reset. Known actions: Greet. (An action that is never enabled under the .cfg constants does not appear.)
 
-    Invalid mapping HelloOutlaw.Specs.Greeter:
+    Invalid mapping HelloNotary.Specs.Greeter:
       actions/0 names actions that never occur in the spec's state graph: Increment, Reset. Known actions: Greet. (An action that is never enabled under the .cfg constants does not appear.)
 
-Outlaw: verification FAILED.
+Notary: verification FAILED.
 ```
 
-The `error[invalid_mapping]` block is Outlaw rendering that error as a
-compiler-style diagnostic, pointing straight at the `use Outlaw.Conformance`
+The `error[invalid_mapping]` block is Notary rendering that error as a
+compiler-style diagnostic, pointing straight at the `use Notary.Conformance`
 line and the `def actions` that names the unknown actions, with the fix in
 `help:`. The plain-text summary underneath is unchanged, for tools (or
 terminals) that don't render the diagnostic.
 
 Whether the agent writes it or you do, the result looks like this.
 
-**The implementation**, `lib/hello_outlaw/greeter.ex`:
+**The implementation**, `lib/hello_notary/greeter.ex`:
 
 ```elixir
-defmodule HelloOutlaw.Greeter do
+defmodule HelloNotary.Greeter do
   @moduledoc "Says \"Hello, world!\" exactly once."
   use Agent
 
@@ -276,19 +276,19 @@ defmodule HelloOutlaw.Greeter do
 end
 ```
 
-**The mapping module**, `test/outlaw/greeter_spec.ex`. It tells Outlaw how to
+**The mapping module**, `test/notary/greeter_spec.ex`. It tells Notary how to
 start your code, how to perform each spec action, and how to read your
 code's state back as the spec's variables:
 
 ```elixir
-defmodule HelloOutlaw.Specs.Greeter do
-  use Outlaw.Conformance, spec: "specs/Greeter.tla"
+defmodule HelloNotary.Specs.Greeter do
+  use Notary.Conformance, spec: "specs/Greeter.tla"
 
-  alias HelloOutlaw.Greeter
+  alias HelloNotary.Greeter
 
   @impl true
   def init do
-    # Print into a StringIO instead of the terminal: Outlaw runs this
+    # Print into a StringIO instead of the terminal: Notary runs this
     # hundreds of times.
     {:ok, device} = StringIO.open("")
     {:ok, greeter} = Greeter.start_link(device)
@@ -321,18 +321,18 @@ end
 Two details matter here:
 
 - **`{:rejected, reason, ctx}`.** When your code refuses an action, the
-  mapping says so. Outlaw then checks the refusal was correct: the spec
+  mapping says so. Notary then checks the refusal was correct: the spec
   must also forbid that action in the current state, and your code's state
   must not have changed.
 - **`project/1` returns spec values.** The keys are the spec's variable
   names as strings, and the values use TLA+ types: booleans, integers and
-  strings as themselves (see `Outlaw.Value` for sets, sequences and
+  strings as themselves (see `Notary.Value` for sets, sequences and
   records).
 
 You can try the greeter by hand:
 
 ```console
-$ mix run -e '{:ok, g} = HelloOutlaw.Greeter.start_link(); IO.inspect(HelloOutlaw.Greeter.greet(g)); IO.inspect(HelloOutlaw.Greeter.greet(g))'
+$ mix run -e '{:ok, g} = HelloNotary.Greeter.start_link(); IO.inspect(HelloNotary.Greeter.greet(g)); IO.inspect(HelloNotary.Greeter.greet(g))'
 Hello, world!
 :ok
 {:error, :already_greeted}
@@ -341,7 +341,7 @@ Hello, world!
 ## 6. Verify
 
 ```console
-$ mix outlaw.verify
+$ mix notary.verify
 lock: pass
 
 Greeter: pass
@@ -349,7 +349,7 @@ Greeter: pass
   conformance: pass (100 runs, seed 624585)
     coverage: actions 1/1, observed states 2/2, transitions 1/1
 
-Outlaw: all checks passed.
+Notary: all checks passed.
 ```
 
 Here's what just happened:
@@ -357,7 +357,7 @@ Here's what just happened:
 - **lock** — the spec files match what you locked, so nobody changed them
   behind your back.
 - **check** — TLC model-checked the spec again: no invariant is violated.
-- **conformance** — Outlaw ran 100 generated sequences of `Greet` calls
+- **conformance** — Notary ran 100 generated sequences of `Greet` calls
   against your real code. After every step it compared your code's state
   (from `project/1`) with what the spec allows, and checked that refused
   actions really were forbidden.
@@ -365,7 +365,7 @@ Here's what just happened:
   one transition. A gap would show up here as a `warning:` line.
 
 The same check also runs with plain `mix test`, through the generated
-`test/outlaw/greeter_conformance_test.exs`:
+`test/notary/greeter_conformance_test.exs`:
 
 ```console
 $ mix test
@@ -388,7 +388,7 @@ end
 ```
 
 ```console
-$ mix outlaw.verify
+$ mix notary.verify
 lock: pass
 
 Greeter: FAIL
@@ -419,10 +419,10 @@ Greeter: FAIL
     Spec allowed: (no Greet transition is enabled here)
     minimized: 2 replays, 0 items removed, 0 params reduced
 
-    Reproduce: mix outlaw.test Greeter --seed 100761
-    Visualize: mix outlaw.graph Greeter --trace failure --open
+    Reproduce: mix notary.test Greeter --seed 100761
+    Visualize: mix notary.graph Greeter --trace failure --open
 
-Outlaw: verification FAILED.
+Notary: verification FAILED.
 ```
 
 Reading the report:
@@ -432,10 +432,10 @@ Reading the report:
   `specs/Greeter.tla` (`greeted = FALSE`, in a state where `greeted = TRUE`),
   with the fix (`help:`) right there instead of buried further down the
   report. `Greet` has only one guard here, so there's only one candidate to
-  underline. Outlaw doesn't evaluate TLA+, so it never claims *which* guard
+  underline. Notary doesn't evaluate TLA+, so it never claims *which* guard
   is false — when an action has several, every one is marked, and none is
   singled out as the culprit.
-- **The step table** below it is the shortest sequence Outlaw found that
+- **The step table** below it is the shortest sequence Notary found that
   triggers the bug: greet once (fine), then greet again. The second `Greet`
   should have been refused.
 - **`Spec allowed:`** shows what the spec permitted at that step: nothing,
@@ -443,11 +443,11 @@ Reading the report:
 - **`Reproduce:`** reruns exactly this failure, with the same seed.
 
 You can also see the spec's state graph. `--format mermaid` prints a diagram
-that renders on GitHub and in most markdown viewers. Without it, Outlaw
-writes an interactive HTML page to `_build/outlaw/`.
+that renders on GitHub and in most markdown viewers. Without it, Notary
+writes an interactive HTML page to `_build/notary/`.
 
 ```console
-$ mix outlaw.graph Greeter --trace failure --format mermaid
+$ mix notary.graph Greeter --trace failure --format mermaid
 stateDiagram-v2
     state "greeted = FALSE" as s0
     state "greeted = TRUE" as s1
@@ -458,7 +458,7 @@ stateDiagram-v2
 ```
 
 The graph has no `Greet` edge out of `greeted = TRUE`, and that's exactly the
-step the broken code took. Put the guard back, and `mix outlaw.verify`
+step the broken code took. Put the guard back, and `mix notary.verify`
 passes again.
 
 ## Next steps
@@ -466,9 +466,9 @@ passes again.
 - Continue with [Rate Limiter: Constants and Time](rate-limiter.md): spec
   constants, time as an external action driven by a fake clock, and a
   second kind of failure.
-- If you use an LLM agent, add the snippet `mix outlaw.new` printed to your
+- If you use an LLM agent, add the snippet `mix notary.new` printed to your
   `CLAUDE.md` or `AGENTS.md`, and let the agent run
-  `mix outlaw.verify --json`. Its last line of output is a JSON report
+  `mix notary.verify --json`. Its last line of output is a JSON report
   written for agents to read.
 - For bigger features (several processes, hidden state, external services,
   reactions your code performs on its own) see the README sections on the

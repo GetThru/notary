@@ -1,4 +1,4 @@
-defmodule Outlaw.Fixtures.WizardLive do
+defmodule Notary.Fixtures.WizardLive do
   @moduledoc false
   # session "variant": "correct" | "early_pay" (Pay shown on the address step
   # too) | "no_pay" (Pay never rendered) | "redirect" (Pay navigates to
@@ -48,7 +48,7 @@ defmodule Outlaw.Fixtures.WizardLive do
   def handle_event("pay", _, socket), do: {:noreply, assign(socket, step: "done")}
 end
 
-defmodule Outlaw.Fixtures.WizardDoneLive do
+defmodule Notary.Fixtures.WizardDoneLive do
   @moduledoc false
   # The redirect variant's confirmation page: step "done", address TRUE.
   use Phoenix.LiveView, log: false

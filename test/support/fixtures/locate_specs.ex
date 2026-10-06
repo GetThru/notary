@@ -1,8 +1,8 @@
-defmodule Outlaw.Fixtures.LocateGuardedProjectSpec do
+defmodule Notary.Fixtures.LocateGuardedProjectSpec do
   @moduledoc false
-  # Regression fixture for Outlaw.Mapping.Locate: a guarded def head
+  # Regression fixture for Notary.Mapping.Locate: a guarded def head
   # (`when`) must still be found.
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+  use Notary.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
 
   def init, do: Agent.start_link(fn -> 0 end)
   def actions, do: %{"Inc" => StreamData.constant(%{})}
@@ -10,11 +10,11 @@ defmodule Outlaw.Fixtures.LocateGuardedProjectSpec do
   def project(pid) when is_pid(pid), do: %{"x" => Agent.get(pid, & &1)}
 end
 
-defmodule Outlaw.Fixtures.LocateGuardedActionSpec do
+defmodule Notary.Fixtures.LocateGuardedActionSpec do
   @moduledoc false
   # Regression fixture: a guarded action/3 clause with a string-literal first
   # argument must still record that action name.
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+  use Notary.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
 
   def init, do: Agent.start_link(fn -> 0 end)
   def actions, do: %{"Inc" => StreamData.constant(%{})}
@@ -22,11 +22,11 @@ defmodule Outlaw.Fixtures.LocateGuardedActionSpec do
   def project(pid), do: %{"x" => Agent.get(pid, & &1)}
 end
 
-defmodule Outlaw.Fixtures.LocateGuardedCatchAllActionSpec do
+defmodule Notary.Fixtures.LocateGuardedCatchAllActionSpec do
   @moduledoc false
   # Regression fixture: a guarded action/3 catch-all clause (first argument
   # is a bound variable, not a string literal) must still record "*".
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+  use Notary.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
 
   def init, do: Agent.start_link(fn -> 0 end)
   def actions, do: %{"Inc" => StreamData.constant(%{})}
@@ -34,11 +34,11 @@ defmodule Outlaw.Fixtures.LocateGuardedCatchAllActionSpec do
   def project(pid), do: %{"x" => Agent.get(pid, & &1)}
 end
 
-defmodule Outlaw.Fixtures.LocateMatchPatternActionSpec do
+defmodule Notary.Fixtures.LocateMatchPatternActionSpec do
   @moduledoc false
   # Regression fixture: a `"Inc" = name` match pattern first argument still
   # records the literal action name, not "*".
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+  use Notary.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
 
   def init, do: Agent.start_link(fn -> 0 end)
   def actions, do: %{"Inc" => StreamData.constant(%{})}
@@ -46,12 +46,12 @@ defmodule Outlaw.Fixtures.LocateMatchPatternActionSpec do
   def project(pid), do: %{"x" => Agent.get(pid, & &1)}
 end
 
-defmodule Outlaw.Fixtures.LocateSkippedPatternActionSpec do
+defmodule Notary.Fixtures.LocateSkippedPatternActionSpec do
   @moduledoc false
   # Regression fixture: a first argument pattern that is neither a literal
   # name, a `"Name" = var` match, nor a plain variable/`_` (here, a tuple) is
   # skipped entirely -- never recorded as "*".
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+  use Notary.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
 
   def init, do: Agent.start_link(fn -> 0 end)
   def actions, do: %{"Inc" => StreamData.constant(%{})}
@@ -59,11 +59,11 @@ defmodule Outlaw.Fixtures.LocateSkippedPatternActionSpec do
   def project(pid), do: %{"x" => Agent.get(pid, & &1)}
 end
 
-defmodule Outlaw.Fixtures.LocateArityHelperSpec do
+defmodule Notary.Fixtures.LocateArityHelperSpec do
   @moduledoc false
   # Regression fixture: public helpers that share a callback's name but not
   # its arity (declared first) must not be picked over the real callback.
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
+  use Notary.Conformance, spec: "test/fixtures/specs/Counter.tla", discover: false
 
   def init(_opts), do: :not_this_one
   def actions(_extra), do: :not_this_one

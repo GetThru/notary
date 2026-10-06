@@ -1,4 +1,4 @@
-defmodule Outlaw.Fixtures.Counter do
+defmodule Notary.Fixtures.Counter do
   @moduledoc false
   use Agent
 

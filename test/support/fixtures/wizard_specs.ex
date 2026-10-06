@@ -1,15 +1,15 @@
-defmodule Outlaw.Fixtures.WizardSpec do
+defmodule Notary.Fixtures.WizardSpec do
   @moduledoc false
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Wizard.tla"
-  import Outlaw.Conformance.LiveView
+  use Notary.Conformance, spec: "test/fixtures/specs/Wizard.tla"
+  import Notary.Conformance.LiveView
 
-  @endpoint Outlaw.Fixtures.Web.Endpoint
+  @endpoint Notary.Fixtures.Web.Endpoint
 
   @impl true
   def init, do: mount_variant("correct")
 
   def mount_variant(variant),
-    do: mount(Outlaw.Fixtures.WizardLive, endpoint: @endpoint, session: %{"variant" => variant})
+    do: mount(Notary.Fixtures.WizardLive, endpoint: @endpoint, session: %{"variant" => variant})
 
   @impl true
   def actions,
@@ -34,11 +34,11 @@ defmodule Outlaw.Fixtures.WizardSpec do
   def teardown(ctx), do: unmount(ctx)
 end
 
-defmodule Outlaw.Fixtures.WizardEarlyPaySpec do
+defmodule Notary.Fixtures.WizardEarlyPaySpec do
   @moduledoc false
   # Bug: Pay is offered (and works) before the payment step.
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Wizard.tla", discover: false
-  alias Outlaw.Fixtures.WizardSpec
+  use Notary.Conformance, spec: "test/fixtures/specs/Wizard.tla", discover: false
+  alias Notary.Fixtures.WizardSpec
 
   def init, do: WizardSpec.mount_variant("early_pay")
   defdelegate actions(), to: WizardSpec
@@ -47,11 +47,11 @@ defmodule Outlaw.Fixtures.WizardEarlyPaySpec do
   defdelegate teardown(ctx), to: WizardSpec
 end
 
-defmodule Outlaw.Fixtures.WizardNoPaySpec do
+defmodule Notary.Fixtures.WizardNoPaySpec do
   @moduledoc false
   # Bug: Pay is never offered.
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Wizard.tla", discover: false
-  alias Outlaw.Fixtures.WizardSpec
+  use Notary.Conformance, spec: "test/fixtures/specs/Wizard.tla", discover: false
+  alias Notary.Fixtures.WizardSpec
 
   def init, do: WizardSpec.mount_variant("no_pay")
   defdelegate actions(), to: WizardSpec
@@ -60,14 +60,14 @@ defmodule Outlaw.Fixtures.WizardNoPaySpec do
   defdelegate teardown(ctx), to: WizardSpec
 end
 
-defmodule Outlaw.Fixtures.WizardRedirectSpec do
+defmodule Notary.Fixtures.WizardRedirectSpec do
   @moduledoc false
   # Correct, routed: Pay navigates to /wizard/done, StartOver navigates back.
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Wizard.tla", discover: false
-  import Outlaw.Conformance.LiveView
-  alias Outlaw.Fixtures.WizardSpec
+  use Notary.Conformance, spec: "test/fixtures/specs/Wizard.tla", discover: false
+  import Notary.Conformance.LiveView
+  alias Notary.Fixtures.WizardSpec
 
-  def init, do: mount("/wizard", endpoint: Outlaw.Fixtures.Web.Endpoint)
+  def init, do: mount("/wizard", endpoint: Notary.Fixtures.Web.Endpoint)
   defdelegate actions(), to: WizardSpec
   defdelegate action(name, params, ctx), to: WizardSpec
   defdelegate project(ctx), to: WizardSpec

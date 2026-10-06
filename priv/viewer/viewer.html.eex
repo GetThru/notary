@@ -43,7 +43,7 @@ button { font: inherit; padding: 4px 10px; border: 1px solid var(--border); back
   <p class="hint">Large graphs start collapsed: double-click a state to expand its neighbours.</p>
 </aside>
 <div id="graph"></div>
-<script type="application/json" id="outlaw-data"><%= @data %></script>
+<script type="application/json" id="notary-data"><%= @data %></script>
 <script><%= @cytoscape %></script>
 <script><%= @app %></script>
 </body>

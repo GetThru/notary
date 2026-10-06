@@ -1,4 +1,4 @@
-defmodule Outlaw.Fixtures.Web.ToggleLive do
+defmodule Notary.Fixtures.Web.ToggleLive do
   @moduledoc false
   use Phoenix.LiveView, log: false
 

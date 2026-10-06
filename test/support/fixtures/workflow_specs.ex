@@ -1,7 +1,7 @@
-defmodule Outlaw.Fixtures.WorkflowSpec do
+defmodule Notary.Fixtures.WorkflowSpec do
   @moduledoc false
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Workflow.tla"
-  alias Outlaw.Fixtures.{FakeGateway, Orders}
+  use Notary.Conformance, spec: "test/fixtures/specs/Workflow.tla"
+  alias Notary.Fixtures.{FakeGateway, Orders}
 
   @users ["u1", "u2"]
 
@@ -45,11 +45,11 @@ defmodule Outlaw.Fixtures.WorkflowSpec do
   defp reply({:error, reason}, ctx), do: {:rejected, reason, ctx}
 end
 
-defmodule Outlaw.Fixtures.WorkflowIgnoresGatewaySpec do
+defmodule Notary.Fixtures.WorkflowIgnoresGatewaySpec do
   @moduledoc false
   # Bug: payments succeed while the gateway is down.
-  use Outlaw.Conformance, spec: "test/fixtures/specs/Workflow.tla", discover: false
-  alias Outlaw.Fixtures.{FakeGateway, Orders}
+  use Notary.Conformance, spec: "test/fixtures/specs/Workflow.tla", discover: false
+  alias Notary.Fixtures.{FakeGateway, Orders}
 
   def init do
     {:ok, gateway} = FakeGateway.start_link()
@@ -57,7 +57,7 @@ defmodule Outlaw.Fixtures.WorkflowIgnoresGatewaySpec do
     {:ok, %{orders: orders, gateway: gateway}}
   end
 
-  defdelegate actions(), to: Outlaw.Fixtures.WorkflowSpec
-  defdelegate action(name, params, ctx), to: Outlaw.Fixtures.WorkflowSpec
-  defdelegate project(ctx), to: Outlaw.Fixtures.WorkflowSpec
+  defdelegate actions(), to: Notary.Fixtures.WorkflowSpec
+  defdelegate action(name, params, ctx), to: Notary.Fixtures.WorkflowSpec
+  defdelegate project(ctx), to: Notary.Fixtures.WorkflowSpec
 end

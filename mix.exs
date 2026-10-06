@@ -1,11 +1,11 @@
-defmodule Outlaw.MixProject do
+defmodule Notary.MixProject do
   use Mix.Project
 
   @version "0.1.0"
 
   def project do
     [
-      app: :outlaw,
+      app: :notary,
       version: @version,
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -14,12 +14,12 @@ defmodule Outlaw.MixProject do
       test_ignore_filters: [~r{^test/fixtures/}],
       description:
         "TLA+ specifications as the contract between humans and LLMs for Elixir projects.",
-      name: "Outlaw",
+      name: "Notary",
       docs: docs()
     ]
   end
 
-  def cli, do: [preferred_envs: ["outlaw.test": :test, "outlaw.verify": :test]]
+  def cli, do: [preferred_envs: ["notary.test": :test, "notary.verify": :test]]
 
   def application do
     [extra_applications: [:logger, :eex, :mix, :inets, :ssl, :public_key, :crypto]]

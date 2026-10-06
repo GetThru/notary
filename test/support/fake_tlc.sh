@@ -1,5 +1,5 @@
 #!/bin/sh
-# A stand-in for `java` in Outlaw.Tools.TLCRunner tests (no JVM needed).
+# A stand-in for `java` in Notary.Tools.TLCRunner tests (no JVM needed).
 #
 # The runner passes JVM args first, so the control directory is the LAST
 # argument. Writes its PID to <dir>/pid, then reads one command per line from
