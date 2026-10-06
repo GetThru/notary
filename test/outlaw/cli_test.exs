@@ -56,4 +56,16 @@ defmodule Outlaw.CLITest do
       assert CLI.conformance_opts([]) == []
     end
   end
+
+  describe "parse!/2 only: key" do
+    test "accepts listed switches and plain args" do
+      assert CLI.parse!(["--json", "Counter"], only: [:json]) == {[json: true], ["Counter"]}
+    end
+
+    test "raises on unlisted switches (they would be silently ignored)" do
+      assert_raise Mix.Error, ~r/Unknown or invalid options: --seed/, fn ->
+        CLI.parse!(["--seed", "5", "Counter"], only: [:json])
+      end
+    end
+  end
 end

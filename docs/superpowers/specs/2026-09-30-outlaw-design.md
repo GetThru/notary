@@ -287,9 +287,12 @@ generator: uniform picks from `actions/0`, no `:settle` points).
   every graph edge whose action is declared external (an `actions/0` key) or
   internal, and whose source `s` is reachable from `closure(initial)` by some
   external-action path — and emits that shortest path, then `a` if external,
-  or a `:settle` point if `a` is internal. If the value's token list is
-  shorter than the path needs (e.g. after shrinking), the prefix is simply cut
-  to however many tokens are available, same as running out of `max_steps`.
+  or a `:settle` point if `a` is internal. (Uniform over *edges*: a source
+  state with k successors via one action contributes k entries, so branchy
+  transitions are proportionally more likely to be targeted.) If the value's
+  token list is shorter than the path needs (e.g. after shrinking), the
+  prefix is simply cut to however many tokens are available, same as running
+  out of `max_steps`.
   All paths come from a single BFS (parent-pointer map) run once per
   generator build, not one search per target. If there is no eligible edge at
   all, every value is pure continuation (below), untargeted.

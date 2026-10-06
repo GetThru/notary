@@ -53,6 +53,13 @@ defmodule Outlaw.Conformance.Walk do
   continuation from `closure(initial)`: the generator degrades to the
   random walk described below with no targeted prefix, rather than failing.
 
+  The target is picked uniformly over *edges*, not over `(source, action)`
+  pairs or over target states: `entries` is built per graph edge, so a
+  source state whose action has k distinct successors contributes k entries
+  and is k times as likely to be targeted — which favors multi-successor
+  (branchy) transitions, arguably what targeting is for. Design spec §5.1's
+  "uniformly among the eligible edges" is meant exactly this way.
+
   ## Forced settle (fair internal actions)
 
   After emitting an action `a`, the walk checks the *direct* successors of

@@ -13,7 +13,22 @@ defmodule Mix.Tasks.Outlaw.Lock do
 
   @impl true
   def run(args) do
-    {opts, _} = CLI.parse!(args)
+    {opts, names} = CLI.parse!(args)
+
+    # `spec` names are deliberately not accepted (the lock is all-or-nothing
+    # and the moduledoc stresses "only the human runs it"); a stray name (or
+    # a conformance flag) reaching this far would lock everything while
+    # pretending the argument meant something.
+    case names do
+      [] ->
+        :ok
+
+      names ->
+        Mix.raise(
+          "mix outlaw.lock takes no spec names (it always locks every spec), got: #{Enum.join(names, " ")}"
+        )
+    end
+
     dir = Config.specs_dir()
     {:ok, files} = Lock.write(dir)
 

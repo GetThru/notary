@@ -13,7 +13,10 @@ defmodule Mix.Tasks.Outlaw.Check do
 
   @impl true
   def run(args) do
-    {opts, names} = CLI.parse!(args)
+    # No --seed/--max-runs/--max-steps/--force: those drive conformance, not
+    # TLC (`mix outlaw.check` model-checks the spec alone), so accepting them
+    # silently would pretend they did something.
+    {opts, names} = CLI.parse!(args, only: [:json])
     results = Enum.map(CLI.specs!(names), &Verify.check_spec/1)
     CLI.finish(Verify.report(nil, results), opts)
   end

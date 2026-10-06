@@ -12,8 +12,23 @@ defmodule Outlaw.CLI do
     force: :boolean
   ]
 
-  def parse!(args, extra \\ []) do
-    {opts, names, invalid} = OptionParser.parse(args, strict: @switches ++ extra)
+  def parse!(args, extra \\ [])
+
+  # Tasks that don't take conformance switches (`outlaw.check`) pass
+  # `only: [...keys...]` so a `--seed N` there raises instead of being
+  # silently ignored.
+  def parse!(args, only: keys) do
+    switches = Keyword.take(@switches, keys)
+    parse_strict!(switches, args)
+  end
+
+  # Otherwise `extra` is additional switches (none in use today).
+  def parse!(args, extra) do
+    parse_strict!(@switches ++ extra, args)
+  end
+
+  defp parse_strict!(switches, args) do
+    {opts, names, invalid} = OptionParser.parse(args, strict: switches)
 
     if invalid != [],
       do: Mix.raise("Unknown or invalid options: #{Enum.map_join(invalid, ", ", &elem(&1, 0))}")
@@ -58,6 +73,9 @@ defmodule Outlaw.CLI do
     Outlaw.Conformance.discover_mappings(Mix.Project.config()[:app])
   end
 
+  # `:force` is carried for `Verify.test_spec/3`, whose graph stage takes it
+  # from this same list (`@graph_opts`) to force a full TLC rebuild; the
+  # conformance stage itself ignores it.
   def conformance_opts(opts) do
     validate_positive!(opts, :max_runs)
     validate_positive!(opts, :max_steps)

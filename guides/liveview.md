@@ -443,6 +443,10 @@ missing element. Measured the same way, this bug is caught on 10/10 seeds.
   own `disabled` attribute and, for `submit/3`, at the submit buttons inside
   the form. It does not consider a submit button outside the form
   (`form="id"`), `input[type=image]`, or `fieldset[disabled]`.
+- **`value/2` on a `<select multiple>` returns only the first selected
+  option** (in DOM order), not the full selection. Multi-select forms are
+  rare in LiveView; if you have one, read the options with `attr/3`/`texts/2`
+  instead.
 
 ## Next steps
 

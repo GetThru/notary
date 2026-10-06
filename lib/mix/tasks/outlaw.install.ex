@@ -12,7 +12,11 @@ defmodule Mix.Tasks.Outlaw.Install do
 
   @impl true
   def run(args) do
-    {opts, _, _} = OptionParser.parse(args, strict: [force: :boolean])
+    {opts, extra_args, invalid} = OptionParser.parse(args, strict: [force: :boolean])
+
+    if invalid != [] or extra_args != [] do
+      Mix.raise("Usage: mix outlaw.install [--force]")
+    end
 
     case Tools.install(force: Keyword.get(opts, :force, false)) do
       {:ok, path} ->

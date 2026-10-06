@@ -174,6 +174,12 @@ defmodule Mix.Tasks.OutlawTasksTest do
     assert JSON.decode!(File.read!(report_path)) == json
   end
 
+  test "outlaw.lock rejects stray spec names instead of silently locking everything" do
+    assert_raise Mix.Error, ~r/takes no spec names.*Counter/s, fn ->
+      Mix.Task.rerun("outlaw.lock", ["Counter"])
+    end
+  end
+
   test "assert_conforms passes for correct mappings and raises a readable report for buggy ones" do
     assert Outlaw.Conformance.assert_conforms(Outlaw.Fixtures.CounterSpec, max_runs: 30) == :ok
 
