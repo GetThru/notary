@@ -2,6 +2,7 @@
 
 > Any behavior not in the spec is uncertified.
 
+
 Notary makes **TLA+ specifications the contract between you and an LLM** in
 Elixir projects. You write the spec. TLC model-checks it. The LLM implements it.
 Notary then proves the implementation behaves like the spec, by driving it
