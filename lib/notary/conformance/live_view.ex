@@ -27,6 +27,12 @@ if Code.ensure_loaded?(Phoenix.LiveViewTest) and Code.ensure_loaded?(LazyHTML) d
 
     alias Notary.Conformance.LiveView.Ctx
 
+    # ExUnit's undocumented test-supervisor API (see below) isn't part of
+    # ExUnit's docs, so Dialyzer flags it as unknown; LiveViewTest itself
+    # depends on the same internals.
+    @dialyzer {:nowarn_function,
+               [unregister: 0, stop_test_supervisor: 1, ensure_test_supervisor: 0]}
+
     @doc """
     Mounts `target` and returns `{:ok, ctx}`. `target` is a LiveView module
     (mounted in isolation, no router needed) or a path (requires a router;

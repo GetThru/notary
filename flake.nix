@@ -16,7 +16,7 @@
       system:
       let
         pkgs = import nixpkgs { inherit system; };
-        beam = pkgs.beam.packages.erlang_27;
+        beam = pkgs.beam.packages.erlang_28;
 
         # The TLA+ tools jar Notary pins (Notary.Config.tla_version/0 and
         # jar_sha256/0). Keep this in sync with lib/notary/config.ex.
@@ -56,7 +56,7 @@
         devShells.default = pkgs.mkShell {
           packages = [
             beam.erlang
-            beam.elixir_1_19
+            beam.elixir_1_20
           ]
           ++ toolsPackages;
           shellHook = toolsHook + ''

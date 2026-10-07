@@ -7,7 +7,7 @@ defmodule Notary.MixProject do
     [
       app: :notary,
       version: @version,
-      elixir: "~> 1.18",
+      elixir: "~> 1.20",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -34,7 +34,16 @@ defmodule Notary.MixProject do
       {:pentiment, "~> 0.2.1"},
       {:phoenix_live_view, "~> 1.2", optional: true},
       {:lazy_html, "~> 0.1", optional: true},
-      {:ex_doc, "~> 0.40", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.40", only: :dev, runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
+    ]
+  end
+
+  defp dialyzer do
+    [
+      plt_add_apps: [:mix, :ex_unit],
+      plt_file: {:no_warn, "priv/plts/dialyzer.plt"},
+      flags: [:error_handling, :underspecs, :unmatched_returns]
     ]
   end
 
