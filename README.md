@@ -70,7 +70,7 @@ its tools shell into yours:
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    notary.url = "git+file:///path/to/notary";  # until Notary has a public repo
+    notary.url = "github:GetThru/notary";
   };
 
   outputs = { nixpkgs, flake-utils, notary, ... }:
@@ -81,7 +81,7 @@ its tools shell into yours:
           # Java and the TLA+ tools jar for Notary.
           inputsFrom = [ notary.devShells.${system}.tools ];
           # Your project's own toolchain.
-          packages = [ pkgs.beam.packages.erlang_27.elixir_1_19 ];
+          packages = [ pkgs.beam.packages.erlang_28.elixir_1_20 ];
         };
       });
 }
@@ -93,14 +93,14 @@ Then `nix develop` and use `mix notary.*` as usual.
 directory. Elixir comes from wherever you normally get it:
 
 ```console
-$ nix develop /path/to/notary#tools
+$ nix develop github:GetThru/notary#tools
 $ mix notary.verify
 ```
 
-Or for a single command: `nix develop /path/to/notary#tools -c mix notary.verify`.
+Or for a single command: `nix develop github:GetThru/notary#tools -c mix notary.verify`.
 
 Don't use the flake's *default* shell for your project. That shell is for
-working on Notary itself: it pins Elixir 1.19 and points `MIX_HOME` and
+working on Notary itself: it pins Elixir 1.20 and points `MIX_HOME` and
 `HEX_HOME` at folders in the current directory.
 
 ## Workflow
