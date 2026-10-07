@@ -9,9 +9,17 @@ Notary then proves the implementation behaves like the spec, by driving it
 through generated action sequences and checking every step against the spec's
 full state graph.
 
+## Documentation
+
+Full guides and API reference live at
+**https://getthru.github.io/notary/** — published from every `main` push and
+`v*` tag.
+
 New to Notary? Start with the
 [Getting Started: Hello, World](guides/getting-started.md) guide, which goes
-from `mix new` to a verified feature in a few minutes.
+from `mix new` to a verified feature in a few minutes. The same guide is at
+[Getting Started](https://getthru.github.io/notary/getting-started.html) on
+the docs site.
 
 ## Install
 
@@ -206,7 +214,9 @@ from the rendered page with page-query helpers (`text/2`, `has?/2`,
 `attr/3`, `value/2`, ...) — no Notary code or test-only markup in app
 templates, since Notary is a `:dev`/`:test` dependency. `assigns/1` is an
 escape hatch for state the page never shows. See the
-[LiveView guide](guides/liveview.md) for the full walkthrough.
+[LiveView guide](guides/liveview.md) — also at
+[LiveView](https://getthru.github.io/notary/liveview.html) on the docs
+site — for the full walkthrough.
 
 Measured on a three-step checkout wizard (seeds 1..10, default 100 runs,
 spec `test/fixtures/specs/Wizard.tla`, script
