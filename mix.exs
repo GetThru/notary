@@ -2,6 +2,7 @@ defmodule Notary.MixProject do
   use Mix.Project
 
   @version "0.1.0"
+  @source_url "https://github.com/GetThru/notary"
 
   def project do
     [
@@ -15,6 +16,8 @@ defmodule Notary.MixProject do
       description:
         "TLA+ specifications as the contract between humans and LLMs for Elixir projects.",
       name: "Notary",
+      source_url: @source_url,
+      homepage_url: @source_url,
       docs: docs()
     ]
   end
@@ -50,6 +53,8 @@ defmodule Notary.MixProject do
   defp docs do
     [
       main: "readme",
+      source_ref: "v#{@version}",
+      source_url_pattern: "#{@source_url}/blob/v#{@version}/%{path}#L%{line}",
       extras: [
         "README.md",
         "guides/getting-started.md",
