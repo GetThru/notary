@@ -45,6 +45,7 @@ defmodule Notary.MixProject do
   defp dialyzer do
     [
       plt_add_apps: [:mix, :ex_unit],
+      plt_add_deps: :app_tree,
       plt_file: {:no_warn, "priv/plts/dialyzer.plt"},
       flags: [:error_handling, :underspecs, :unmatched_returns]
     ]
@@ -59,7 +60,8 @@ defmodule Notary.MixProject do
         "README.md",
         "guides/getting-started.md",
         "guides/rate-limiter.md",
-        "guides/liveview.md"
+        "guides/liveview.md",
+        "guides/dsl.md"
       ],
       groups_for_extras: [Guides: ~r{^guides/}],
       before_closing_body_tag: &before_closing_body_tag/1
