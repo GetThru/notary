@@ -18,14 +18,11 @@ allowed (only before the first greeting).
 
 You need:
 
-- Elixir 1.19 or newer.
+- Elixir 1.20 or newer.
 - Java 11 or newer, to run the TLA+ model checker (TLC). Check with
   `java -version`. If you use Nix, Notary's flake can provide Java and the
   TLA+ tools jar for you: see "Using Nix" in the README. Then you can skip
   `mix notary.install` in step 2.
-- A local copy of Notary. It isn't published to Hex yet, so this guide
-  depends on it by path. The examples assume it lives next to your project,
-  at `../notary`.
 
 You don't need to know TLA+ already. Everything the spec uses is explained
 as it comes up.
@@ -49,7 +46,7 @@ defmodule HelloNotary.MixProject do
     [
       app: :hello_notary,
       version: "0.1.0",
-      elixir: "~> 1.19",
+      elixir: "~> 1.20",
       # 1. Compile the mapping modules under test/notary in the test env.
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -72,7 +69,7 @@ defmodule HelloNotary.MixProject do
   defp deps do
     [
       # 3. Notary itself, only needed in dev and test.
-      {:notary, path: "../notary", only: [:dev, :test]}
+      {:notary, git: "https://github.com/GetThru/notary.git", only: [:dev, :test]}
     ]
   end
 end
