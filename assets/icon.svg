@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="256" height="256" role="img" aria-label="Notary">
+  <title>Notary</title>
+  <!-- Small-size mark: the stamp without its ring text. -->
+  <g transform="rotate(-12 50 50)" fill="none" stroke="#5A3592" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="50" cy="50" r="43" stroke-width="9"/>
+    <path d="M32 51 L45 64 L69 37" stroke-width="11"/>
+  </g>
+</svg>

@@ -54,6 +54,9 @@ defmodule Notary.MixProject do
   defp docs do
     [
       main: "readme",
+      logo: "assets/icon.svg",
+      favicon: "assets/icon.svg",
+      assets: %{"assets" => "assets"},
       source_ref: "v#{@version}",
       source_url_pattern: "#{@source_url}/blob/v#{@version}/%{path}#L%{line}",
       extras: [

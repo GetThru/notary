@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="512" height="512" role="img" aria-label="Notary">
+  <title>Notary</title>
+  <defs>
+    <path id="ring" d="M50,50 m-36.5,0 a36.5,36.5 0 1,1 73,0 a36.5,36.5 0 1,1 -73,0"/>
+    <!-- Worn-ink gaps, cut out so the stamp sits on any background. -->
+    <mask id="wear">
+      <rect width="100" height="100" fill="#fff"/>
+      <g transform="rotate(-12 50 50)" fill="#000">
+        <circle cx="80" cy="22" r="1.5"/>
+        <circle cx="14" cy="62" r="1.1"/>
+        <circle cx="57" cy="57" r="0.9"/>
+        <rect x="44" y="94.5" width="8" height="1.8"/>
+      </g>
+    </mask>
+  </defs>
+  <g mask="url(#wear)">
+    <g transform="rotate(-12 50 50)" fill="none" stroke="#B79AE8">
+      <circle cx="50" cy="50" r="46" stroke-width="3.5"/>
+      <circle cx="50" cy="50" r="33" stroke-width="1.5"/>
+      <path d="M36 51 L46 61 L65 40" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <text font-family="IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-weight="600" font-size="7" fill="#B79AE8" stroke="none"><textPath href="#ring" textLength="226" lengthAdjust="spacing">NOTARY • SPEC VERIFIED • TLC CHECKED •</textPath></text>
+    </g>
+  </g>
+</svg>

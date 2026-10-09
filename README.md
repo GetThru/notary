@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/wordmark-dark.svg">
+    <img src="assets/wordmark.svg" alt="Notary" width="340">
+  </picture>
+</p>
+
 # Notary
 
 > Any behavior not in the spec is uncertified.
