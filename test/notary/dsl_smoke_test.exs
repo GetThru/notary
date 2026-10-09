@@ -139,4 +139,69 @@ defmodule Notary.DSL.SmokeTest do
     cfg2 = Description.cfg(SmokeCounter.__notary_description__())
     refute cfg2 =~ "CHECK_DEADLOCK"
   end
+
+  describe "mixed and/or" do
+    defmodule SmokeMixed do
+      use Notary.DSL, name: "SmokeMixed", generate: false
+
+      variable(a: boolean())
+      variable(b: boolean())
+      variable(c: boolean())
+
+      initial(a: false, b: false, c: false)
+
+      action AndOfOr do
+        guard((a or b) and c)
+        assign(a: true)
+      end
+
+      action OrOfAnd do
+        guard((a and b) or c)
+        assign(b: true)
+      end
+    end
+
+    test "a nested junction keeps its grouping" do
+      out = Description.tla(SmokeMixed.__notary_description__())
+
+      assert out =~ "AndOfOr == /\\ (a \\/ b) /\\ c"
+      assert out =~ "OrOfAnd == /\\ (a /\\ b) \\/ c"
+      refute out =~ "a /\\ b /\\ c"
+    end
+  end
+
+  describe "auto-UNCHANGED with compound effects" do
+    defmodule SmokeEffects do
+      use Notary.DSL, name: "SmokeEffects", generate: false
+
+      variable(x: boolean())
+      variable(y: boolean())
+      variable(z: boolean())
+
+      initial(x: true, y: true, z: true)
+
+      action Both do
+        both(assign(x: false), assign(y: false))
+      end
+
+      action Either do
+        either(assign(x: false), assign(y: false))
+      end
+    end
+
+    setup do
+      %{out: Description.tla(SmokeEffects.__notary_description__())}
+    end
+
+    test "variables assigned inside both/2 are not also UNCHANGED", %{out: out} do
+      assert out =~ "Both == /\\ x' = FALSE /\\ y' = FALSE\n"
+      assert out =~ "/\\ UNCHANGED z"
+      refute out =~ "UNCHANGED <<x, y"
+    end
+
+    test "each either/2 branch leaves its siblings' variables UNCHANGED", %{out: out} do
+      assert out =~ "(x' = FALSE /\\ UNCHANGED y) \\/ (y' = FALSE /\\ UNCHANGED x)"
+      assert out =~ "/\\ UNCHANGED z"
+    end
+  end
 end

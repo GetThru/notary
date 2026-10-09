@@ -20,7 +20,7 @@ defmodule Mix.Tasks.Notary.Verify do
   def run(args) do
     CLI.ensure_test_env!("notary.verify")
     {opts, names} = CLI.parse!(args)
-    Mix.Tasks.Notary.Compile.sync_and_report()
+    Mix.Tasks.Notary.Compile.sync_and_report(opts)
     mappings = CLI.load_mappings!()
     lock = Verify.lock_stage(Config.specs_dir())
 

@@ -195,10 +195,16 @@ defmodule Notary.DSL.Expr do
   def render({:op, op, args}, opts), do: render_op(op, args, opts)
 
   defp render_op(:parallel, args, opts),
-    do: args |> Enum.flat_map(&flatten/1) |> Enum.map(&render(&1, opts)) |> Enum.join(" /\\ ")
+    do:
+      args
+      |> Enum.flat_map(&flatten(:parallel, &1))
+      |> Enum.map_join(" /\\ ", &chain_item(&1, opts))
 
   defp render_op(:choice, args, opts),
-    do: args |> Enum.flat_map(&flatten/1) |> Enum.map(&render(&1, opts)) |> Enum.join(" \\/ ")
+    do:
+      args
+      |> Enum.flat_map(&flatten(:choice, &1))
+      |> Enum.map_join(" \\/ ", &chain_item(&1, opts))
 
   defp render_op(:not, [a], opts), do: "~#{atomize(a, opts)}"
   defp render_op(:neg, [a], opts), do: "-#{atomize(a, opts)}"
@@ -237,10 +243,20 @@ defmodule Notary.DSL.Expr do
     do: "IF #{render(c, opts)} THEN #{render(t, opts)} ELSE #{render(e, opts)}"
 
   # Same-op chains (both/both, either/either, multi-line blocks) flatten so
-  # the rendered formula has no redundant grouping.
-  defp flatten({:op, :parallel, args}), do: Enum.flat_map(args, &flatten/1)
-  defp flatten({:op, :choice, args}), do: Enum.flat_map(args, &flatten/1)
-  defp flatten(term), do: [term]
+  # the rendered formula has no redundant grouping. Only the chain's own op
+  # splices: a `\/` inside a `/\` chain (or vice versa) stays a parenthesized
+  # subterm, or `(a or b) and c` would render as `a /\ b /\ c`.
+  defp flatten(op, {:op, op, args}), do: Enum.flat_map(args, &flatten(op, &1))
+  defp flatten(_op, term), do: [term]
+
+  # A chain item needs parens only when it binds no tighter than the chain:
+  # the other junction (what `flatten` left behind) or an IF, which extends
+  # as far right as it can. Comparisons and arithmetic bind tighter and read
+  # cleaner bare (`x = 1 /\ y`).
+  defp chain_item({:op, op, _} = term, opts) when op in [:parallel, :choice, :and, :or, :if],
+    do: "(" <> render(term, opts) <> ")"
+
+  defp chain_item(term, opts), do: render(term, opts)
 
   # `atomize` parenthesizes compound sub-terms. Conservative and simple: any
   # operator term gets parens when it sits as a subterm of another operator;

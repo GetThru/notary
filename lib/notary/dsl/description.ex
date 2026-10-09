@@ -294,6 +294,11 @@ defmodule Notary.DSL.Description do
 
     actions =
       for a <- d.actions do
+        a =
+          if Map.get(a, :explicit_unchanged, false),
+            do: a,
+            else: Map.update!(a, :effects, fn effects -> Enum.map(effects, &close_branches/1) end)
+
         touched = Enum.flat_map(a.effects, &effect_touched_vars/1) |> MapSet.new()
         untouched = var_names |> MapSet.difference(touched) |> MapSet.to_list() |> Enum.sort()
 
@@ -324,10 +329,65 @@ defmodule Notary.DSL.Description do
   defp still_missing([one]), do: "variable #{one}"
   defp still_missing(many), do: "variables #{Enum.join(many, ", ")}"
 
+  # Variables an effect fully determines. A conjunction determines everything
+  # its parts do; a disjunction (`either`, or an `if` whose branches assign)
+  # only what EVERY branch determines, since TLC takes one branch per step.
   defp effect_touched_vars({:assign, changes}), do: Map.keys(changes)
   defp effect_touched_vars({:unchanged, names}), do: names
-  defp effect_touched_vars({:op, :choice, args}), do: Enum.flat_map(args, &effect_touched_vars/1)
+
+  defp effect_touched_vars({:op, :parallel, args}),
+    do: Enum.flat_map(args, &effect_touched_vars/1) |> Enum.uniq()
+
+  defp effect_touched_vars({:op, op, _} = term) when op in [:choice, :if] do
+    term
+    |> branches()
+    |> Enum.map(&MapSet.new(effect_touched_vars(&1)))
+    |> Enum.reduce(&MapSet.intersection/2)
+    |> MapSet.to_list()
+  end
+
   defp effect_touched_vars(_), do: []
+
+  # Auto-UNCHANGED inside branches: each branch of an `either`/`if` gets an
+  # UNCHANGED for the variables a sibling branch assigns but it doesn't, so
+  # `either(assign(x: 1), assign(y: 2))` becomes
+  # `(x' = 1 /\ UNCHANGED y) \/ (y' = 2 /\ UNCHANGED x)` rather than leaving
+  # y (or x) unconstrained in one branch.
+  defp close_branches({:op, :parallel, args}),
+    do: {:op, :parallel, Enum.map(args, &close_branches/1)}
+
+  defp close_branches({:op, op, _} = term) when op in [:choice, :if] do
+    closed = term |> branches() |> Enum.map(&close_branches/1)
+
+    if Enum.any?(closed, &has_effect?/1) do
+      all = closed |> Enum.flat_map(&effect_touched_vars/1) |> Enum.uniq()
+
+      closed =
+        Enum.map(closed, fn branch ->
+          case all -- effect_touched_vars(branch) do
+            [] -> branch
+            missing -> {:op, :parallel, [branch, {:unchanged, Enum.sort(missing)}]}
+          end
+        end)
+
+      put_branches(term, closed)
+    else
+      term
+    end
+  end
+
+  defp close_branches(term), do: term
+
+  defp branches({:op, :choice, args}), do: args
+  defp branches({:op, :if, [_cond, t, e]}), do: [t, e]
+
+  defp put_branches({:op, :choice, _}, args), do: {:op, :choice, args}
+  defp put_branches({:op, :if, [c, _, _]}, [t, e]), do: {:op, :if, [c, t, e]}
+
+  defp has_effect?({:assign, _}), do: true
+  defp has_effect?({:unchanged, _}), do: true
+  defp has_effect?({:op, _, args}) when is_list(args), do: Enum.any?(args, &has_effect?/1)
+  defp has_effect?(_), do: false
 
   # `Next` disjunction. Parameterized actions get an existential per param,
   # quantified over the param's declared domain (`\E param \in 1..2 :

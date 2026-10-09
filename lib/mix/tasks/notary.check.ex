@@ -17,7 +17,7 @@ defmodule Mix.Tasks.Notary.Check do
     # TLC (`mix notary.check` model-checks the spec alone), so accepting them
     # silently would pretend they did something.
     {opts, names} = CLI.parse!(args, only: [:json])
-    Mix.Tasks.Notary.Compile.sync_and_report()
+    Mix.Tasks.Notary.Compile.sync_and_report(opts)
     results = Enum.map(CLI.specs!(names), &Verify.check_spec/1)
     CLI.finish(Verify.report(nil, results), opts)
   end

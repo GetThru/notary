@@ -33,15 +33,18 @@ defmodule Mix.Tasks.Notary.Compile do
   @doc false
   @spec sync_and_report(keyword()) :: :ok | no_return()
   def sync_and_report(opts \\ []) do
+    # Sync reads the DSL modules' compiled .beams, so compile first or an
+    # edited DSL module would sync its stale previous emission. Under --json
+    # the compiler's "Compiling N files" chatter would corrupt stdout.
+    compile(opts[:json])
+
     case Compile.sync(opts) do
       {:ok, written, _unchanged} ->
-        written = Enum.sort(written)
-
-        if written != [] do
+        if written != [] and !opts[:json] do
           Mix.shell().info(
-            (opts[:json] == nil &&
-               Enum.map_join(written, "\n", &"* writing #{Path.relative_to_cwd(&1)}")) ||
-              ""
+            written
+            |> Enum.sort()
+            |> Enum.map_join("\n", &"* writing #{Path.relative_to_cwd(&1)}")
           )
         end
 
@@ -49,6 +52,19 @@ defmodule Mix.Tasks.Notary.Compile do
 
       {:error, error} ->
         Mix.raise(error.message)
+    end
+  end
+
+  defp compile(json?) when json? in [nil, false], do: Mix.Task.run("compile")
+
+  defp compile(_json?) do
+    shell = Mix.shell()
+    Mix.shell(Mix.Shell.Quiet)
+
+    try do
+      Mix.Task.run("compile")
+    after
+      Mix.shell(shell)
     end
   end
 end
