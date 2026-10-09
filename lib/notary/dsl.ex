@@ -61,10 +61,10 @@ defmodule Notary.DSL do
     * `property Name, doc: ..., do: temporal_expr` — a `PROPERTY`. Temporal
       operators: `always/1`, `eventually/1`, `leads_to/2`, `enabled/2`.
     * `fair Name` / `strong_fair Name` — weak/strong fairness (`WF_vars`/
-      `SF_vars`) conjuncts added to `Spec`. Fair parameterized actions are
-      emitted quantified: `fair Pay, params: ["amount"]` becomes
-      `\A amount : WF_vars(Pay(amount))`; Notary's fairness scan still finds
-      `Pay`.
+      `SF_vars`) conjuncts added to `Spec`. A parameterized action is fair
+      for every argument: `fair Deposit` on `action Deposit, amount: 1..2`
+      becomes `\A amount \in 1..2 : WF_vars(Deposit(amount))`; Notary's
+      fairness scan still finds `Deposit`.
     * `raw tla_string` — raw TLA+ definitions spliced in before `Next`, for
       anything the surface doesn't cover (quantifiers, set comprehensions
      , sequences). The escape hatch; use it sparingly.
@@ -290,6 +290,13 @@ defmodule Notary.DSL do
 
   @doc "Raw TLA+ definitions spliced in before `Next`. The escape hatch."
   defmacro raw(text) when is_binary(text) do
+    push({:raw, String.trim(text)}, __CALLER__)
+  end
+
+  # `raw ~S"""..."""` (the natural way to write TLA+'s backslashes) arrives
+  # as sigil AST; without interpolation its content is a plain literal.
+  defmacro raw({sigil, _, [{:<<>>, _, [text]}, []]})
+           when sigil in [:sigil_S, :sigil_s] and is_binary(text) do
     push({:raw, String.trim(text)}, __CALLER__)
   end
 

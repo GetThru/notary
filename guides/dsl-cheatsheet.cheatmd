@@ -1,0 +1,323 @@
+# DSL ↔ TLA+ cheatsheet
+
+Every `Notary.DSL` form next to the TLA+ it generates. For the walkthrough,
+see [Writing specs without learning TLA+](dsl.md). The generated `.tla` in
+`specs/` is always the source of truth: when in doubt, run
+`mix notary.compile` and read it.
+
+## Module
+{: .col-2}
+
+### The spec module
+
+```elixir
+defmodule MyApp.Specs.Checkout do
+  use Notary.DSL, name: "Checkout"
+  description "A three-step checkout."
+  # ...
+end
+```
+
+```text
+---- MODULE Checkout ----
+\* A three-step checkout.
+
+EXTENDS Naturals
+...
+=====
+```
+
+Writes `specs/Checkout.tla` and `specs/Checkout.cfg`. `name:` defaults to
+the module's last segment. `EXTENDS` is chosen for you: `Integers` replaces
+`Naturals` when the spec has negative numbers, and `Sequences` and
+`FiniteSets` are added only when the spec uses them.
+
+### Constants
+
+```elixir
+constant max: 3
+```
+
+```text
+\* .tla
+CONSTANT max
+
+\* .cfg
+CONSTANT max = 3
+```
+
+Use the name (`max`) anywhere an expression goes. Keep model values small.
+
+### Raw TLA+
+
+```elixir
+raw ~S"""
+Twice(x) == x + x
+"""
+```
+
+```text
+Twice(x) == x + x
+```
+
+Pasted in before `Next`, for anything the DSL can't express. `~S` keeps
+TLA+'s backslashes literal; a plain string works too.
+
+## State
+{: .col-2}
+
+### Variables and types
+
+| DSL | TLA+ (`TypeOK`) |
+|---|---|
+| `variable flag: boolean()` | `flag \in BOOLEAN` |
+| `variable n: 0..max` | `n \in 0..max` |
+| `variable step: ["a", "b"]` | `step \in {"a", "b"}` |
+| `variable r: %{ok: boolean()}` | `r \in [ok: BOOLEAN]` |
+
+Each `variable` adds to `VARIABLES` and one conjunct to `TypeOK`, which is
+checked as an invariant automatically.
+
+### Initial state
+
+```elixir
+initial flag: false, n: 0, step: "a"
+```
+
+```text
+Init == /\ flag = FALSE
+        /\ n = 0
+        /\ step = "a"
+```
+
+Must give every variable a value.
+
+## Actions
+{: .col-2}
+
+### Guard and assign
+
+```elixir
+action Greet do
+  guard greeted == false
+  assign greeted: true
+end
+```
+
+```text
+Greet == /\ greeted = FALSE
+         /\ greeted' = TRUE
+
+Next == \/ Greet
+```
+
+Each `guard` is one conjunct. `assign(a: 1, b: 2)` gives one `x' = ...`
+line per variable. Every action becomes a disjunct of `Next`.
+
+### What stays the same
+
+```elixir
+action Inc do
+  assign n: n + 1
+end
+```
+
+```text
+Inc == /\ n' = n + 1
+       /\ UNCHANGED <<flag, step>>
+```
+
+Variables an action doesn't assign get `UNCHANGED` automatically.
+
+### Explicit UNCHANGED
+
+```elixir
+action Inc, explicit_unchanged: true do
+  assign n: n + 1
+  unchanged [flag, step]
+end
+```
+
+```text
+Inc == /\ n' = n + 1
+       /\ UNCHANGED <<flag, step>>
+```
+
+`unchanged flag` covers one variable; `unchanged [:flag, :step]` works too.
+
+With `explicit_unchanged: true`, a variable you don't cover is a compile
+error.
+
+### Parameters
+
+```elixir
+action Deposit, amount: 1..2 do
+  guard n + amount <= max
+  assign n: n + amount
+end
+```
+
+```text
+Deposit(amount) == /\ (n + amount) <= max
+                   /\ n' = n + amount
+                   /\ UNCHANGED <<...>>
+
+Next == \/ \E amount \in 1..2 : Deposit(amount)
+```
+
+The domain (a range or a list of values) is also what conformance tests
+generate inputs from.
+
+### Doc comments
+
+```elixir
+action Deposit, amount: 1..2, doc: "Add money." do
+```
+
+```text
+\* Add money.
+Deposit(amount) == ...
+```
+
+### Both and either
+
+| DSL | TLA+ |
+|---|---|
+| `both(assign(a: 1), assign(b: 2))` | `a' = 1 /\ b' = 2` |
+| `either(assign(a: 1), assign(b: 2))` | `(a' = 1 /\ UNCHANGED b) \/ (b' = 2 /\ UNCHANGED a)` |
+| `parallel do ... end` | each line conjoined with `/\` |
+
+`either` is a nondeterministic choice: TLC explores both branches. Each
+branch keeps the variables only its sibling assigns `UNCHANGED`.
+
+## Expressions
+{: .col-2}
+
+### Values and logic
+
+| DSL | TLA+ |
+|---|---|
+| `1`, `"deposit"` | `1`, `"deposit"` |
+| `true`, `false` | `TRUE`, `FALSE` |
+| `count` (a variable) | `count` |
+| `a and b` | `a /\ b` |
+| `a or b` | `a \/ b` |
+| `not a` | `~a` |
+| `if c, do: a, else: b` | `IF c THEN a ELSE b` |
+| `unless c, do: a, else: b` | `IF ~c THEN a ELSE b` |
+
+Every `if`/`unless` needs an `else`. `cond`, `case`, `with`, `for` and
+`fn` aren't supported: nest `if`s or use `raw`.
+
+### Arithmetic and comparison
+
+| DSL | TLA+ |
+|---|---|
+| `a + b`, `a - b`, `a * b` | `a + b`, `a - b`, `a * b` |
+| `a / b` | `a \div b` (integer division) |
+| `rem(a, b)` | `a \mod b` |
+| `a == b`, `a != b` | `a = b`, `a # b` |
+| `<`, `>`, `<=`, `>=` | `<`, `>`, `<=`, `>=` |
+| `min(a, b)` | `IF a <= b THEN a ELSE b` |
+| `max(a, b)` | `IF a >= b THEN a ELSE b` |
+| `-a`, `-1` | `-a`, `-1` (switches `EXTENDS` to `Integers`) |
+
+An assigned comparison is parenthesized: `assign(flag: n == 0)` →
+`flag' = (n = 0)`.
+
+### Sets
+
+| DSL | TLA+ |
+|---|---|
+| `set([1, 2])` | `{1, 2}` |
+| `1..3` | `1..3` |
+| `x in s`, `member?(x, s)` | `x \in s` |
+| `x in ["a", "b"]` | `x \in {"a", "b"}` |
+| `x not in s` | `x \notin s` |
+| `set_union(a, b)` | `a \cup b` |
+| `set_intersect(a, b)` | `a \cap b` |
+| `set_diff(a, b)` | `a \ b` |
+| `cardinality(s)` | `Cardinality(s)` |
+
+A list literal on the right of `in` (or `member?`) is a set. Anywhere else
+a list is a sequence (below): use `set([...])` for a set value.
+
+### Sequences
+
+| DSL | TLA+ |
+|---|---|
+| `[a, b]`, `{a, b}` | `<<a, b>>` |
+| `head(s)`, `tail(s)` | `Head(s)`, `Tail(s)` |
+| `length(s)` | `Len(s)` |
+| `append(s, x)` | `s \o <<x>>` |
+| `concat(a, b)` | `a \o b` |
+| `at(s, i)` | `s[i]` |
+| `subseq(s, m, n)` | `SubSeq(s, m, n)` |
+
+Indexes start at 1, as in TLA+.
+
+### Records
+
+```elixir
+%{a: 1}          # or [a: 1], or record(a: 1)
+domain(r)
+```
+
+```text
+[a |-> 1]
+DOMAIN(r)
+```
+
+Reading a field (`r.a`) isn't supported yet: use `raw`.
+
+## Checking
+{: .col-2}
+
+### Invariants
+
+```elixir
+invariant Bounded, doc: "n stays small",
+  do: n <= max
+```
+
+```text
+\* n stays small
+Bounded ==
+n <= max
+
+\* .cfg
+INVARIANT TypeOK Bounded
+```
+
+Names must be CamelCase. `TypeOK` comes from the variable types and is
+always checked.
+
+### Temporal properties
+
+| DSL | TLA+ |
+|---|---|
+| `property P, do: always(n >= 0)` | `P == [](n >= 0)` |
+| `property P, do: eventually(done)` | `P == <>done` |
+| `property P, do: leads_to(a, b)` | `P == a ~> b` |
+| `enabled(Pay)` | `ENABLED <<Pay>>_<<vars>>` |
+| `enabled(:Deposit, [1])` | `ENABLED <<Deposit(1)>>_<<vars>>` |
+
+Each property is listed under `PROPERTY` in the `.cfg`. In `ENABLED`, `<<vars>>`
+stands for the tuple of all the spec's variables.
+
+### Fairness
+
+| DSL | TLA+ (in `Spec`) |
+|---|---|
+| `fair Pay` | `WF_vars(Pay)` |
+| `strong_fair [Pay, Ship]` | `SF_vars(Pay) /\ SF_vars(Ship)` |
+| `fair Deposit` (with `amount: 1..2`) | `\A amount \in 1..2 : WF_vars(Deposit(amount))` |
+
+Needed for "eventually" properties: without it, TLC may let the system
+stop forever.
+
+### Deadlock
+
+When every action has a guard, the `.cfg` gets `CHECK_DEADLOCK FALSE`: a
+state where nothing is enabled is treated as a finished run, not an error.
+

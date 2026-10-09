@@ -8,7 +8,8 @@ compiler-style diagnostics, conformance.
 
 This guide ports the two specs from the other guides — the Greeter from
 [Getting Started](getting-started.md) and the [rate limiter](rate-limiter.md)
-— to the DSL.
+— to the DSL. For a one-page lookup of every DSL form and the TLA+ it
+generates, see the [DSL ↔ TLA+ cheatsheet](dsl-cheatsheet.cheatmd).
 
 ## The same Greeter spec, in Elixir
 
@@ -195,8 +196,8 @@ StreamData.integer(1..100)`.
 
 ## The expression subset
 
-`Notary.DSL.Expr`'s documentation has the full table (arithmetic, `<`,
-`and`/`or`/`not`, `in`, `if/else`, records `%{a: 1}` → `[a |-> 1]`,
+The [cheatsheet](dsl-cheatsheet.cheatmd) has the full table (arithmetic, `<`,
+`and`/`or`/`not`, sets, `if/else`, records `%{a: 1}` → `[a |-> 1]`,
 sequences `[a, b]` → `<<a, b>>`, `head/tail/length/...`). Anything outside
 it fails *compilation* with the offending code quoted — no silent
 mistranslations. For what the surface doesn't cover (quantifiers over

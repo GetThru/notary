@@ -14,6 +14,9 @@ defmodule Notary.DSL.Expr do
 
   ## Mapping to TLA+
 
+  The complete, verified mapping is the DSL ↔ TLA+ cheatsheet
+  (`guides/dsl-cheatsheet.cheatmd`); this table is a summary.
+
   | Elixir | TLA+ |
   |---|---|
   | `1`, `true`, `"deposit"` | `1`, `TRUE`, `"deposit"` |
@@ -174,7 +177,7 @@ defmodule Notary.DSL.Expr do
   def render({:assign, changes}, opts) do
     changes
     |> Enum.sort()
-    |> Enum.map_join(" /\\ ", fn {name, value} -> "#{name}' = #{render(value, opts)}" end)
+    |> Enum.map_join(" /\\ ", fn {name, value} -> "#{name}' = #{render_rhs(value, opts)}" end)
   end
 
   def render({:temporal, :eventually, [inner]}, opts),
@@ -186,13 +189,27 @@ defmodule Notary.DSL.Expr do
   def render({:temporal, :leads_to, [a, b]}, opts),
     do: "#{atomize(a, opts)} ~> #{atomize(b, opts)}"
 
-  def render({:temporal, :enabled, [{:call, name, args}]}, opts) do
-    rendered = args |> Enum.map(&render(&1, opts)) |> Enum.join(", ")
+  def render({:temporal, :enabled, [call]}, opts) do
     vars = Keyword.fetch!(opts, :vars)
-    "ENABLED <<#{name}(#{rendered})>>_#{vars_subscript(vars)}"
+    "ENABLED <<#{render(call, opts)}>>_#{vars_subscript(vars)}"
   end
 
   def render({:op, op, args}, opts), do: render_op(op, args, opts)
+
+  @doc """
+  Renders the right side of `x = e` / `x' = e`. Parenthesizes `e` when it
+  binds no tighter than `=` itself (`flag' = (n = 0)`): TLA+'s `=` doesn't
+  chain, so `flag' = n = 0` fails to parse.
+  """
+  @spec render_rhs(t(), keyword()) :: String.t()
+  def render_rhs(term, opts \\ [])
+
+  def render_rhs({:op, op, _} = term, opts)
+      when op in [:==, :!=, :<, :>, :<=, :>=, :in, :notin, :subseteq] or
+             op in [:parallel, :choice, :and, :or],
+      do: "(" <> render(term, opts) <> ")"
+
+  def render_rhs(term, opts), do: render(term, opts)
 
   defp render_op(:parallel, args, opts),
     do:
@@ -227,7 +244,7 @@ defmodule Notary.DSL.Expr do
   defp render_op(:intersect, [a, b], opts), do: "#{atomize(a, opts)} \\cap #{atomize(b, opts)}"
   defp render_op(:setminus, [a, b], opts), do: "#{atomize(a, opts)} \\ #{atomize(b, opts)}"
   defp render_op(:concat, [a, b], opts), do: "#{atomize(a, opts)} \\o #{atomize(b, opts)}"
-  defp render_op(:index, [s, i], opts), do: "#{render(s, opts)}[#{render(i, opts)}]"
+  defp render_op(:index, [s, i], opts), do: "#{atomize(s, opts)}[#{render(i, opts)}]"
   defp render_op(:div, [a, b], opts), do: "#{atomize(a, opts)} \\div #{atomize(b, opts)}"
   defp render_op(:mod, [a, b], opts), do: "#{atomize(a, opts)} \\mod #{atomize(b, opts)}"
   defp render_op(:pow, [a, b], opts), do: "#{atomize(a, opts)} ^ #{atomize(b, opts)}"
@@ -286,10 +303,11 @@ defmodule Notary.DSL.Expr do
   defp expr({:__block__, _, lines}, meta) when is_list(lines),
     do: lines |> List.wrap() |> Enum.map(&expr(&1, meta)) |> wrap_parallel()
 
-  defp expr({:parallel, _, [do: lines]}, meta) when is_list(lines),
-    do: lines |> List.wrap() |> Enum.map(&expr(&1, meta)) |> wrap_parallel()
+  # `parallel do ... end`: the block arrives as the call's one keyword arg.
+  defp expr({:parallel, _, [[do: {:__block__, _, lines}]]}, meta),
+    do: lines |> Enum.map(&expr(&1, meta)) |> wrap_parallel()
 
-  defp expr({:parallel, _, [do: line]}, meta), do: expr(line, meta)
+  defp expr({:parallel, _, [[do: line]]}, meta), do: expr(line, meta)
 
   defp expr({:both, _, [a, b]}, meta), do: {:op, :parallel, [expr(a, meta), expr(b, meta)]}
   defp expr({:either, _, [a, b]}, meta), do: {:op, :choice, [expr(a, meta), expr(b, meta)]}
@@ -349,8 +367,15 @@ defmodule Notary.DSL.Expr do
 
   defp expr({:.., _, [a, b]}, meta), do: {:range, expr(a, meta), expr(b, meta)}
 
+  # Membership: a list literal on the right is the set of its items. (Lists
+  # are sequences elsewhere, but `x \in <<...>>` asks whether x is one of the
+  # sequence's index-value pairs, never what `x in [...]` means in Elixir.)
   defp expr({:not, _, [{:in, _, [a, b]}]}, meta),
-    do: {:op, :notin, [expr(a, meta), expr(b, meta)]}
+    do: {:op, :notin, [expr(a, meta), set_operand(b, meta)]}
+
+  defp expr({:in, _, [a, b]}, meta), do: {:op, :in, [expr(a, meta), set_operand(b, meta)]}
+
+  defp expr({:member?, _, [a, b]}, meta), do: {:op, :in, [expr(a, meta), set_operand(b, meta)]}
 
   # Same-op chains flatten so `a and b and c` renders as one /\ chain (the
   # emitter turns top-level chains vertical).
@@ -406,6 +431,10 @@ defmodule Notary.DSL.Expr do
   defp expr({:leads_to, _, [a, b]}, meta),
     do: {:temporal, :leads_to, [expr(a, meta), expr(b, meta)]}
 
+  # `enabled(Pay)` (an alias) or `enabled(:Pay)`, optionally with arguments.
+  defp expr({:enabled, m, [{:__aliases__, _, [name]} | rest]}, meta) when is_atom(name),
+    do: expr({:enabled, m, [name | rest]}, meta)
+
   defp expr({:enabled, _, [name]}, _meta) when is_atom(name),
     do: {:temporal, :enabled, [{:call, Atom.to_string(name), []}]}
 
@@ -451,6 +480,15 @@ defmodule Notary.DSL.Expr do
       meta: meta
   end
 
+  defp set_operand(list, meta) when is_list(list) do
+    case Keyword.keyword?(list) and list != [] do
+      true -> expr(list, meta)
+      false -> {:enum, Enum.map(list, &expr(&1, meta))}
+    end
+  end
+
+  defp set_operand(other, meta), do: expr(other, meta)
+
   defp tla_op(:/), do: :div
   defp tla_op(:rem), do: :mod
   defp tla_op(op), do: op
@@ -463,9 +501,13 @@ defmodule Notary.DSL.Expr do
     [Atom.to_string(name)]
   end
 
-  defp unchanged_names([[_] = list], meta) when is_list(list) do
+  defp unchanged_names([[_ | _] = list], meta) do
     Enum.map(list, fn
       {name, _, nil} when is_atom(name) ->
+        validate_name!(name)
+        Atom.to_string(name)
+
+      name when is_atom(name) ->
         validate_name!(name)
         Atom.to_string(name)
 
@@ -527,7 +569,6 @@ defmodule Notary.DSL.Expr do
   defp fun(:at, [s, i]), do: {:op, :index, [s, i]}
   defp fun(:subseq, [s, a, b]), do: {:call, "SubSeq", [s, a, b]}
 
-  defp fun(:member?, [x, s]), do: {:op, :in, [x, s]}
   defp fun(:set_union, [a, b]), do: {:op, :union, [a, b]}
   defp fun(:set_intersect, [a, b]), do: {:op, :intersect, [a, b]}
   defp fun(:set_diff, [a, b]), do: {:op, :setminus, [a, b]}

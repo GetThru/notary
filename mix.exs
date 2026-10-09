@@ -64,9 +64,10 @@ defmodule Notary.MixProject do
         "guides/getting-started.md",
         "guides/rate-limiter.md",
         "guides/liveview.md",
-        "guides/dsl.md"
+        "guides/dsl.md",
+        "guides/dsl-cheatsheet.cheatmd"
       ],
-      groups_for_extras: [Guides: ~r{^guides/}],
+      groups_for_extras: [Guides: ~r{^guides/.*\.md$}, Cheatsheets: ~r{\.cheatmd$}],
       before_closing_body_tag: &before_closing_body_tag/1
     ]
   end

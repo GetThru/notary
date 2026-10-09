@@ -100,7 +100,7 @@ defmodule Notary.DSL.Description do
         Enum.flat_map(d.raw_defs, &[&1, ""]) ++
         def_block("Next", next_clauses(d), "\\/") ++
         Enum.flat_map(d.invariants, &assertion_lines/1) ++
-        Enum.flat_map(d.properties, &assertion_lines/1) ++
+        Enum.flat_map(d.properties, &assertion_lines(&1, vars: vars)) ++
         fairness_vars_defn(d, vars) ++
         def_block("Spec", spec_clauses(d, vars), "/\\") ++
         ["====="]
@@ -166,8 +166,16 @@ defmodule Notary.DSL.Description do
       |> Enum.filter(fn {_name, pred} -> Enum.any?(terms, pred) end)
       |> Enum.map(&elem(&1, 0))
 
-    ["Naturals" | extensions]
+    # Naturals has no minus sign: a negative literal or `-x` needs Integers
+    # (which extends Naturals, so nothing else is lost).
+    base = if Enum.any?(terms, &negative?/1), do: "Integers", else: "Naturals"
+
+    [base | extensions]
   end
+
+  defp negative?({:op, :neg, _}), do: true
+  defp negative?({:int, n}), do: n < 0
+  defp negative?(_), do: false
 
   defp sequence_used?({:call, name, _}), do: name in ["Head", "Tail", "Len", "SubSeq"]
   defp sequence_used?({:op, :concat, _}), do: true
@@ -178,13 +186,8 @@ defmodule Notary.DSL.Description do
   defp finite_sets_used?(_), do: false
 
   defp all_expr_terms(d) do
-    (Enum.flat_map(d.variables, fn v ->
-       case v.type do
-         {:enum, items} -> items
-         {:range, a, b} -> [a, b]
-         _ -> []
-       end
-     end) ++
+    (Enum.flat_map(d.variables, &domain_terms(&1.type)) ++
+       Enum.flat_map(d.actions, fn a -> Enum.flat_map(a.params, &domain_terms(&1.domain)) end) ++
        Enum.flat_map(d.initial, &(elem(&1, 1) |> List.wrap())) ++
        Enum.flat_map(d.actions, &(&1.guards ++ &1.effects)) ++
        Enum.map(d.invariants, & &1.expr) ++
@@ -192,6 +195,14 @@ defmodule Notary.DSL.Description do
        Enum.flat_map(d.raw_defs, fn _ -> [] end))
     |> Enum.flat_map(&deep_terms/1)
   end
+
+  defp domain_terms({:enum, items}), do: items
+  defp domain_terms({:range, a, b}), do: [a, b]
+
+  defp domain_terms({:record, fields}),
+    do: fields |> Map.values() |> Enum.flat_map(&domain_terms/1)
+
+  defp domain_terms(_), do: []
 
   defp deep_terms(term) do
     children =
@@ -212,27 +223,29 @@ defmodule Notary.DSL.Description do
 
   defp type_ok_clauses(d) do
     for v <- d.variables do
-      set =
-        case v.type do
-          {:boolean, nil} ->
-            {:call, "BOOLEAN", []}
+      if v.type == nil do
+        raise Error,
+          message:
+            "Variable #{v.name} has no type; declare one (`variable #{v.name}: boolean`, " <>
+              "an enum list, or a range) so the generated TypeOK invariant is complete.",
+          line: v[:line]
+      end
 
-          {:enum, items} ->
-            {:enum, items}
-
-          {:range, a, b} ->
-            {:range, a, b}
-
-          nil ->
-            raise Error,
-              message:
-                "Variable #{v.name} has no type; declare one (`variable #{v.name}: boolean`, " <>
-                  "an enum list, or a range) so the generated TypeOK invariant is complete.",
-              line: v[:line]
-        end
-
-      Expr.render({:op, :in, [{:var, v.name}, set]})
+      "#{v.name} \\in #{domain_set(v.type)}"
     end
+  end
+
+  # A variable domain as the TLA+ set of its values. A record domain is a
+  # record set: `%{ok: boolean()}` → `[ok: BOOLEAN]`.
+  defp domain_set({:boolean, nil}), do: "BOOLEAN"
+  defp domain_set({:enum, items}), do: Expr.render({:enum, items})
+  defp domain_set({:range, a, b}), do: Expr.render({:range, a, b})
+
+  defp domain_set({:record, fields}) do
+    fields
+    |> Enum.sort()
+    |> Enum.map_join(", ", fn {k, t} -> "#{k}: #{domain_set(t)}" end)
+    |> then(&"[#{&1}]")
   end
 
   defp init_clauses(d) do
@@ -253,7 +266,7 @@ defmodule Notary.DSL.Description do
     end
 
     for {name, value} <- Enum.sort(d.initial) do
-      "#{name} = #{Expr.render(value)}"
+      "#{name} = #{Expr.render_rhs(value)}"
     end
   end
 
@@ -442,7 +455,7 @@ defmodule Notary.DSL.Description do
   # yields its UNCHANGED clause; anything else (e.g. an `if` whose branches
   # assign different variables) renders on one line.
   defp effect_clauses({:assign, changes}),
-    do: for({name, value} <- Enum.sort(changes), do: "#{name}' = #{Expr.render(value)}")
+    do: for({name, value} <- Enum.sort(changes), do: "#{name}' = #{Expr.render_rhs(value)}")
 
   defp effect_clauses({:unchanged, names}),
     do: [Expr.render({:unchanged, names})]
@@ -469,7 +482,17 @@ defmodule Notary.DSL.Description do
     conjuncts =
       Enum.map(d.fairness, fn %{name: name, strength: strength} ->
         prefix = if strength == :weak, do: "WF", else: "SF"
-        "#{prefix}_vars(#{name})"
+
+        # A parameterized action is fair for every argument:
+        # `\A amount \in 1..2 : WF_vars(Deposit(amount))`.
+        case Enum.find(d.actions, &(&1.name == name)) do
+          %{params: [_ | _] = params} = action ->
+            quants = Enum.map_join(params, &"\\A #{&1.name} \\in #{param_domain(&1)} : ")
+            "#{quants}#{prefix}_vars(#{String.trim_trailing(action_head(action), " ==")})"
+
+          _ ->
+            "#{prefix}_vars(#{name})"
+        end
       end)
 
     [base | conjuncts]
@@ -485,14 +508,14 @@ defmodule Notary.DSL.Description do
     end
   end
 
-  defp assertion_lines(%{name: name, doc: doc} = a) do
+  defp assertion_lines(%{name: name, doc: doc} = a, opts \\ []) do
     doc_lines =
       case doc do
         nil -> []
         doc -> String.split(doc, "\n", trim: true) |> Enum.map(&("\\* " <> &1))
       end
 
-    doc_lines ++ ["#{name} ==", body("     ", Expr.render(a.expr)), ""]
+    doc_lines ++ ["#{name} ==", body("     ", Expr.render(a.expr, opts)), ""]
   end
 
   defp property_lines(d) do
