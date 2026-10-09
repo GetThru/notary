@@ -17,6 +17,7 @@ defmodule Mix.Tasks.Notary.Test do
   def run(args) do
     CLI.ensure_test_env!("notary.test")
     {opts, names} = CLI.parse!(args)
+    Mix.Tasks.Notary.Compile.sync_and_report(opts)
     mappings = CLI.load_mappings!()
 
     results =

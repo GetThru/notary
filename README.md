@@ -21,6 +21,9 @@ from `mix new` to a verified feature in a few minutes. The same guide is at
 [Getting Started](https://getthru.github.io/notary/getting-started.html) on
 the docs site.
 
+Don't want to learn TLA+? Write the spec in Elixir with `Notary.DSL` and
+Notary generates the `.tla`/`.cfg`: see [Writing specs without learning TLA+](guides/dsl.md).
+
 ## Install
 
 ```elixir
@@ -134,6 +137,10 @@ defmodule MyApp.Specs.Bank do
   def project(pid), do: %{"balance" => MyApp.Bank.balance(pid)}
 end
 ```
+
+If the spec was written with `Notary.DSL`, `use Notary.Conformance.DSL,
+from: MyApp.Specs.Bank` derives `actions/0` from the spec's parameter
+domains — see the [DSL guide](guides/dsl.md).
 
 - `project/1` returns spec variables using `Notary.Value`'s representation:
   model values are `model("u1")`, sets are `set([...])`, sequences are lists,

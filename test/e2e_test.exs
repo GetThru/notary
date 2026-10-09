@@ -35,7 +35,9 @@ defmodule Notary.E2ETest do
     assert %{"status" => "pass"} = last_json(out)
 
     {out, 0} = mix(ctx, ["test"])
-    assert out =~ "1 test, 0 failures"
+    # ExUnit's summary line changed wording in 1.20 ("Result: 1 passed",
+    # previously "1 test, 0 failures"); accept either.
+    assert out =~ "Result: 1 passed" or out =~ "1 test, 0 failures"
 
     File.cp!(
       Path.join(ctx.app, "buggy/counter.ex"),

@@ -30,6 +30,7 @@ defmodule Mix.Tasks.Notary.Lock do
     end
 
     dir = Config.specs_dir()
+    Mix.Tasks.Notary.Compile.sync_and_report(opts)
     {:ok, files} = Lock.write(dir)
 
     if opts[:json] do
